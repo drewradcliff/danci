@@ -1,4 +1,4 @@
-import { generateText, jsonSchema, Output } from "ai";
+import { generateText } from "ai";
 import { NextResponse } from "next/server";
 
 import {
@@ -35,7 +35,17 @@ function errorResponse(
   );
 }
 
-function buildSelectionPrompt(
+type StructuredDefinition = {
+  word: string;
+  meaning: string;
+  examples: string[];
+};
+
+function hasListPrefix(value: string): boolean {
+  return /^\s*(?:[-*•]|\d+[.)])\s+/.test(value);
+}
+
+function buildStructuredPrompt(
   context: string,
   word: string,
   definitions: DictionaryDefinition[],
@@ -59,9 +69,63 @@ function buildSelectionPrompt(
     "Candidate definitions:",
     candidates,
     "",
-    `Return JSON only in the exact shape {"selectedIndex": <number>}.`,
-    `Use an integer selectedIndex between 0 and ${definitions.length - 1}.`,
+    "Return JSON only in this exact shape:",
+    '{ "word": "...", "meaning": "...", "examples": ["...", "...", "..."] }',
+    "",
+    "Rules:",
+    "- meaning must be one short sentence.",
+    "- examples must contain 2 to 4 short plain-text phrases or sentences.",
+    "- examples should use similar usage contexts for the target word.",
+    "- Do not include numbering or bullet characters in strings.",
+    "- Preserve the original word casing from the target word.",
+    "- Do not include markdown or any keys other than word, meaning, examples.",
   ].join("\n");
+}
+
+function parseStructuredDefinition(rawText: string): StructuredDefinition | null {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.word !== "string" || !record.word.trim()) {
+    return null;
+  }
+
+  if (typeof record.meaning !== "string" || !record.meaning.trim()) {
+    return null;
+  }
+
+  if (!Array.isArray(record.examples)) {
+    return null;
+  }
+
+  const examples = record.examples
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (examples.length < 2 || examples.length > 4) {
+    return null;
+  }
+
+  if (examples.some(hasListPrefix)) {
+    return null;
+  }
+
+  return {
+    word: record.word.trim(),
+    meaning: record.meaning.trim(),
+    examples,
+  };
 }
 
 export async function POST(request: Request) {
@@ -112,46 +176,40 @@ export async function POST(request: Request) {
     );
   }
 
-  let selectedIndex = 0;
   let usedFallback = true;
+  let jsonParseFailed = false;
+  let rawModelOutput: string | null = null;
+  let structured: StructuredDefinition | null = null;
 
   try {
     const aiResponse = await generateText({
       model: "openai/gpt-5-mini",
-      output: Output.object({
-        schema: jsonSchema<{ selectedIndex: number }>({
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            selectedIndex: {
-              type: "integer",
-              minimum: 0,
-              maximum: definitions.length - 1,
-            },
-          },
-          required: ["selectedIndex"],
-        }),
-      }),
-      prompt: buildSelectionPrompt(parsed.context, parsed.word, definitions),
+      prompt: buildStructuredPrompt(parsed.context, parsed.word, definitions),
     });
 
-    selectedIndex = aiResponse.output.selectedIndex;
-    usedFallback = false;
+    rawModelOutput = aiResponse.text.trim();
+    structured = parseStructuredDefinition(rawModelOutput);
+    usedFallback = structured === null;
+    jsonParseFailed = structured === null;
   } catch {
     usedFallback = true;
   }
 
-  const selectedDefinition = definitions[selectedIndex] ?? definitions[0];
+  const selectedDefinition = definitions[0];
+  const fallbackText = jsonParseFailed ? rawModelOutput : null;
 
   return NextResponse.json({
     phrase: parsed.phrase,
     context: parsed.context,
+    structured,
+    fallbackText,
+    // Compatibility fallback for older rendering paths.
     word: parsed.word,
     definition: selectedDefinition,
     meta: {
       definitionsFound: definitions.length,
-      selectedIndex,
       usedFallback,
+      jsonParseFailed,
     },
   });
 }

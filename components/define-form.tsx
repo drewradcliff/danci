@@ -3,20 +3,26 @@
 import { FormEvent, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 type DefineApiSuccess = {
   phrase: string;
   context: string;
-  word: string;
-  definition: {
+  structured: {
+    word: string;
+    meaning: string;
+    examples: string[];
+  } | null;
+  fallbackText: string | null;
+  // Compatibility shape from API fallback.
+  word?: string;
+  definition?: {
     meaning: string;
     examples: string[];
   };
   meta: {
     definitionsFound: number;
-    selectedIndex: number;
     usedFallback: boolean;
+    jsonParseFailed: boolean;
   };
 };
 
@@ -27,11 +33,49 @@ type DefineApiError = {
   };
 };
 
+type PreviewParts = {
+  before: string;
+  marked: string;
+  after: string;
+};
+
+function getPreviewParts(phrase: string): PreviewParts | null {
+  const firstMarkerIndex = phrase.indexOf("*");
+
+  if (firstMarkerIndex === -1) {
+    return null;
+  }
+
+  const secondMarkerIndex = phrase.indexOf("*", firstMarkerIndex + 1);
+
+  if (secondMarkerIndex === -1) {
+    return null;
+  }
+
+  const marked = phrase.slice(firstMarkerIndex + 1, secondMarkerIndex);
+
+  if (!marked) {
+    return null;
+  }
+
+  return {
+    before: phrase.slice(0, firstMarkerIndex).replace(/\*/g, ""),
+    marked,
+    after: phrase.slice(secondMarkerIndex + 1).replace(/\*/g, ""),
+  };
+}
+
 export function DefineForm() {
   const [phrase, setPhrase] = useState("blades apply a *shear* force that");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DefineApiSuccess | null>(null);
+  const preview = getPreviewParts(phrase);
+
+  function adjustTextareaHeight(textarea: HTMLTextAreaElement) {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -75,22 +119,36 @@ export function DefineForm() {
         <label htmlFor="phrase" className="text-sm font-medium text-zinc-700">
           Phrase with one marked word
         </label>
-        <div className="flex items-center gap-2">
-          <Input
+        <div className="flex items-start gap-2">
+          <textarea
             id="phrase"
             name="phrase"
-            type="text"
+            rows={3}
             placeholder="blades apply a *shear* force that"
             autoComplete="off"
-            className="h-12"
+            className="border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 flex min-h-12 w-full rounded-md border bg-transparent px-3 py-3 text-base shadow-xs outline-none resize-y overflow-auto focus-visible:ring-[3px]"
             value={phrase}
-            onChange={(event) => setPhrase(event.target.value)}
+            onChange={(event) => {
+              setPhrase(event.target.value);
+              adjustTextareaHeight(event.target);
+            }}
             disabled={isLoading}
           />
           <Button type="submit" className="h-12 shrink-0" disabled={isLoading}>
             {isLoading ? "Defining..." : "Define"}
           </Button>
         </div>
+
+        {preview ? (
+          <div>
+            <p className="preview-label">Preview</p>
+            <div className="preview-text">
+              {preview.before}
+              <span className="highlight">{preview.marked}</span>
+              {preview.after}
+            </div>
+          </div>
+        ) : null}
       </form>
 
       {error ? (
@@ -100,27 +158,38 @@ export function DefineForm() {
       ) : null}
 
       {result ? (
-        <div className="mt-4 space-y-3 rounded-md border border-zinc-200 bg-zinc-50 p-4">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Word</p>
-            <p className="text-lg font-semibold text-zinc-900">{result.word}</p>
-          </div>
+        <div className="result-card">
+          {result.structured ? (
+            <>
+              <div className="result-section">
+                <div className="result-label">WORD</div>
+                <div className="result-word">{result.structured.word}</div>
+              </div>
 
-          <div>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Meaning</p>
-            <p className="text-zinc-800">{result.definition.meaning}</p>
-          </div>
+              <div className="result-section">
+                <div className="result-label">MEANING</div>
+                <div className="result-meaning">{result.structured.meaning}</div>
+              </div>
 
-          {result.definition.examples.length > 0 ? (
-            <div>
-              <p className="text-xs uppercase tracking-wide text-zinc-500">Examples</p>
-              <ul className="list-disc space-y-1 pl-5 text-zinc-700">
-                {result.definition.examples.map((example) => (
-                  <li key={example}>{example}</li>
-                ))}
-              </ul>
+              <div className="result-section">
+                <div className="result-label">MORE USE CASES ALIKE</div>
+                <ul className="result-examples">
+                  {result.structured.examples.map((example, index) => (
+                    <li key={`${example}-${index}`}>{example}</li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          ) : (
+            <div className="result-section">
+              <div className="result-label">RESULT</div>
+              <div className="result-meaning">
+                {result.fallbackText ??
+                  result.definition?.meaning ??
+                  "No structured result available."}
+              </div>
             </div>
-          ) : null}
+          )}
         </div>
       ) : null}
     </section>
