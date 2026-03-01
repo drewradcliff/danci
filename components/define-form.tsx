@@ -66,7 +66,7 @@ function getPreviewParts(phrase: string): PreviewParts | null {
 }
 
 export function DefineForm() {
-  const [phrase, setPhrase] = useState("blades apply a *shear* force that");
+  const [phrase, setPhrase] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DefineApiSuccess | null>(null);
@@ -124,7 +124,7 @@ export function DefineForm() {
             id="phrase"
             name="phrase"
             rows={3}
-            placeholder="blades apply a *shear* force that"
+            placeholder="Enter a phrase with an *esoteric* word in it"
             autoComplete="off"
             className="border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 flex min-h-12 w-full rounded-md border bg-transparent px-3 py-3 text-base shadow-xs outline-none resize-y overflow-auto focus-visible:ring-[3px]"
             value={phrase}
