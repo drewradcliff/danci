@@ -64,6 +64,23 @@ function buildSelectionPrompt(
   ].join("\n");
 }
 
+function collectUniqueExamples(definitions: DictionaryDefinition[]): string[] {
+  const seen = new Set<string>();
+  const examples: string[] = [];
+
+  for (const definition of definitions) {
+    for (const example of definition.examples) {
+      const normalizedExample = example.trim();
+      if (normalizedExample && !seen.has(normalizedExample)) {
+        seen.add(normalizedExample);
+        examples.push(normalizedExample);
+      }
+    }
+  }
+
+  return examples;
+}
+
 export async function POST(request: Request) {
   let body: DefineRequestBody;
   try {
@@ -142,12 +159,18 @@ export async function POST(request: Request) {
   }
 
   const selectedDefinition = definitions[selectedIndex] ?? definitions[0];
+  const allExamples = collectUniqueExamples(definitions);
+  const exampleSentences =
+    selectedDefinition.examples.length > 0
+      ? selectedDefinition.examples
+      : allExamples;
 
   return NextResponse.json({
     phrase: parsed.phrase,
     context: parsed.context,
     word: parsed.word,
     definition: selectedDefinition,
+    exampleSentences,
     meta: {
       definitionsFound: definitions.length,
       selectedIndex,

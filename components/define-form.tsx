@@ -13,6 +13,7 @@ type DefineApiSuccess = {
     meaning: string;
     examples: string[];
   };
+  exampleSentences: string[];
   meta: {
     definitionsFound: number;
     selectedIndex: number;
@@ -111,16 +112,20 @@ export function DefineForm() {
             <p className="text-zinc-800">{result.definition.meaning}</p>
           </div>
 
-          {result.definition.examples.length > 0 ? (
-            <div>
-              <p className="text-xs uppercase tracking-wide text-zinc-500">Examples</p>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Examples</p>
+            {result.exampleSentences.length > 0 ? (
               <ul className="list-disc space-y-1 pl-5 text-zinc-700">
-                {result.definition.examples.map((example) => (
-                  <li key={example}>{example}</li>
+                {result.exampleSentences.map((example, index) => (
+                  <li key={`${index}-${example}`}>{example}</li>
                 ))}
               </ul>
-            </div>
-          ) : null}
+            ) : (
+              <p className="text-zinc-600">
+                No example sentences were provided by the dictionary API.
+              </p>
+            )}
+          </div>
         </div>
       ) : null}
     </section>

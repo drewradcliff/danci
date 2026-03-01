@@ -28,9 +28,32 @@ function normalizeExamples(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function dedupeStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const uniqueValues: string[] = [];
+
+  for (const value of values) {
+    if (!seen.has(value)) {
+      seen.add(value);
+      uniqueValues.push(value);
+    }
+  }
+
+  return uniqueValues;
+}
+
+function extractExamples(record: Record<string, unknown>): string[] {
+  return dedupeStrings([
+    ...normalizeExamples(record.examples),
+    ...normalizeExamples(record.example),
+    ...normalizeExamples(record.exampleSentence),
+    ...normalizeExamples(record.exampleSentences),
+  ]);
+}
+
 function collectDefinitions(input: unknown): DictionaryDefinition[] {
   const definitions: DictionaryDefinition[] = [];
-  const seen = new Set<string>();
+  const definitionIndexByMeaning = new Map<string, number>();
 
   function walk(node: unknown): void {
     if (Array.isArray(node)) {
@@ -54,12 +77,24 @@ function collectDefinitions(input: unknown): DictionaryDefinition[] {
 
     if (meaning) {
       const normalizedMeaning = meaning.trim();
-      if (normalizedMeaning && !seen.has(normalizedMeaning)) {
-        seen.add(normalizedMeaning);
-        definitions.push({
-          meaning: normalizedMeaning,
-          examples: normalizeExamples(record.examples ?? record.example),
-        });
+      if (normalizedMeaning) {
+        const normalizedExamples = extractExamples(record);
+        const existingDefinitionIndex =
+          definitionIndexByMeaning.get(normalizedMeaning);
+
+        if (existingDefinitionIndex === undefined) {
+          definitionIndexByMeaning.set(normalizedMeaning, definitions.length);
+          definitions.push({
+            meaning: normalizedMeaning,
+            examples: normalizedExamples,
+          });
+        } else if (normalizedExamples.length > 0) {
+          const existingDefinition = definitions[existingDefinitionIndex];
+          existingDefinition.examples = dedupeStrings([
+            ...existingDefinition.examples,
+            ...normalizedExamples,
+          ]);
+        }
       }
     }
 
