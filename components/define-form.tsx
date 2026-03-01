@@ -141,10 +141,12 @@ export function DefineForm() {
 
         {preview ? (
           <div>
-            <p className="preview-label">Preview</p>
-            <div className="preview-text">
+            <p className="mt-2 text-xs text-[#666]">Preview</p>
+            <div className="mt-0.5 leading-[1.4]">
               {preview.before}
-              <span className="highlight">{preview.marked}</span>
+              <span className="rounded-[3px] bg-[rgba(255,230,150,0.6)] px-0.5 font-semibold">
+                {preview.marked}
+              </span>
               {preview.after}
             </div>
           </div>
@@ -158,32 +160,36 @@ export function DefineForm() {
       ) : null}
 
       {result ? (
-        <div className="result-card">
+        <div className="mt-[14px] rounded-[10px] bg-[#f7f7f7] px-[18px] py-4">
           {result.structured ? (
             <>
-              <div className="result-section">
-                <div className="result-label">WORD</div>
-                <div className="result-word">{result.structured.word}</div>
+              <div className="mt-[14px] first:mt-0">
+                <div className="mb-1.5 text-[11px] tracking-[0.08em] text-[#777]">WORD</div>
+                <div className="text-[22px] font-bold">{result.structured.word}</div>
               </div>
 
-              <div className="result-section">
-                <div className="result-label">MEANING</div>
-                <div className="result-meaning">{result.structured.meaning}</div>
+              <div className="mt-[14px] first:mt-0">
+                <div className="mb-1.5 text-[11px] tracking-[0.08em] text-[#777]">MEANING</div>
+                <div className="leading-[1.5]">{result.structured.meaning}</div>
               </div>
 
-              <div className="result-section">
-                <div className="result-label">MORE USE CASES ALIKE</div>
-                <ul className="result-examples">
+              <div className="mt-[14px] first:mt-0">
+                <div className="mb-1.5 text-[11px] tracking-[0.08em] text-[#777]">
+                  MORE USE CASES ALIKE
+                </div>
+                <ul className="m-0 list-disc pl-[18px]">
                   {result.structured.examples.map((example, index) => (
-                    <li key={`${example}-${index}`}>{example}</li>
+                    <li key={`${example}-${index}`} className="mb-[6px]">
+                      {example}
+                    </li>
                   ))}
                 </ul>
               </div>
             </>
           ) : (
-            <div className="result-section">
-              <div className="result-label">RESULT</div>
-              <div className="result-meaning">
+            <div className="mt-[14px] first:mt-0">
+              <div className="mb-1.5 text-[11px] tracking-[0.08em] text-[#777]">RESULT</div>
+              <div className="leading-[1.5]">
                 {result.fallbackText ??
                   result.definition?.meaning ??
                   "No structured result available."}
