@@ -78,7 +78,7 @@ export async function getDictionaryDefinitions(
   word: string
 ): Promise<DictionaryDefinition[]> {
   const urls = [
-    `https://api.freedictionaryapi.com/v1/define?text=${encodeURIComponent(word)}`,
+    `https://freedictionaryapi.com/en/${encodeURIComponent(word)}`,
     `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`,
   ];
 
