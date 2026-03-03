@@ -124,3 +124,217 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes signin-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -12px, 0) scale(1.04);
+  }
+}
+
+@keyframes signin-rise {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.signin-shell {
+  --signin-ink: oklch(0.31 0.06 244);
+  --signin-accent: oklch(0.72 0.15 32);
+  --signin-mint: oklch(0.89 0.08 176);
+  --signin-blush: oklch(0.93 0.08 12);
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 10% 15%, var(--signin-mint), transparent 43%),
+    radial-gradient(circle at 86% 18%, var(--signin-blush), transparent 45%),
+    radial-gradient(circle at 56% 85%, oklch(0.95 0.04 236), transparent 42%),
+    linear-gradient(150deg, oklch(0.99 0.02 220) 0%, oklch(0.97 0.04 22) 100%);
+  display: grid;
+  place-items: center;
+}
+
+.signin-shell::before {
+  content: "";
+  position: absolute;
+  width: min(68vw, 700px);
+  height: min(68vw, 700px);
+  border-radius: 9999px;
+  filter: blur(70px);
+  background: linear-gradient(130deg, oklch(0.85 0.09 203 / 0.34), oklch(0.88 0.11 20 / 0.3));
+  animation: signin-float 8s ease-in-out infinite;
+  z-index: 0;
+}
+
+.signin-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 18% 74%, oklch(1 0 0 / 0.48) 0 16px, transparent 17px),
+    radial-gradient(circle at 84% 66%, oklch(1 0 0 / 0.42) 0 11px, transparent 12px),
+    radial-gradient(circle at 74% 32%, oklch(1 0 0 / 0.4) 0 8px, transparent 9px);
+  z-index: 0;
+}
+
+.signin-grid {
+  position: relative;
+  z-index: 1;
+  width: min(960px, 100%);
+  display: grid;
+  gap: 1.2rem;
+  animation: signin-rise 550ms ease-out both;
+}
+
+.signin-intro {
+  border-radius: 1.8rem;
+  border: 1px solid oklch(0.78 0.04 242 / 0.33);
+  background: linear-gradient(145deg, oklch(1 0 0 / 0.66), oklch(0.99 0.01 240 / 0.58));
+  backdrop-filter: blur(8px);
+  padding: clamp(1.4rem, 4vw, 2.3rem);
+  box-shadow:
+    0 28px 44px oklch(0.24 0.03 248 / 0.12),
+    inset 0 1px 0 oklch(1 0 0 / 0.8);
+}
+
+.signin-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.signin-hanzi {
+  width: 2.7rem;
+  height: 2.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-family: var(--font-signin-headline), serif;
+  font-size: 1.55rem;
+  color: oklch(0.35 0.08 23);
+  background: linear-gradient(145deg, oklch(1 0 0), oklch(0.93 0.09 24));
+  border: 1px solid oklch(0.84 0.06 28 / 0.68);
+  box-shadow: 0 8px 20px oklch(0.62 0.08 24 / 0.24);
+}
+
+.signin-kicker {
+  font-family: var(--font-signin-body), var(--font-geist-sans), sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: oklch(0.44 0.08 236);
+}
+
+.signin-kicker-soft {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: oklch(0.52 0.06 237);
+}
+
+.signin-title {
+  margin-top: 0.95rem;
+  font-family: var(--font-signin-headline), serif;
+  font-size: clamp(2.05rem, 6vw, 3.45rem);
+  line-height: 0.97;
+  color: var(--signin-ink);
+  text-wrap: balance;
+}
+
+.signin-subtitle {
+  margin-top: 1rem;
+  max-width: 46ch;
+  font-family: var(--font-signin-body), var(--font-geist-sans), sans-serif;
+  font-size: 1rem;
+  line-height: 1.68;
+  color: oklch(0.39 0.04 240);
+}
+
+.signin-card {
+  border-radius: 1.8rem;
+  border: 1px solid oklch(0.78 0.05 244 / 0.36);
+  background:
+    linear-gradient(145deg, oklch(1 0 0 / 0.88), oklch(0.98 0.03 236 / 0.86)),
+    oklch(1 0 0);
+  padding: clamp(1.4rem, 4vw, 2rem);
+  box-shadow:
+    0 24px 40px oklch(0.24 0.03 240 / 0.13),
+    inset 0 1px 0 oklch(1 0 0 / 0.85);
+  font-family: var(--font-signin-body), var(--font-geist-sans), sans-serif;
+}
+
+.signin-card-title {
+  margin-top: 0.7rem;
+  font-family: var(--font-signin-headline), serif;
+  font-size: clamp(1.75rem, 4vw, 2.35rem);
+  line-height: 1.05;
+  color: var(--signin-ink);
+}
+
+.signin-card-copy {
+  margin-top: 0.75rem;
+  color: oklch(0.37 0.03 245);
+  line-height: 1.55;
+}
+
+.signin-google-button {
+  background: linear-gradient(125deg, oklch(0.7 0.14 33), var(--signin-accent));
+  color: oklch(0.99 0.01 52);
+  border: 1px solid oklch(0.64 0.1 29 / 0.64);
+  box-shadow: 0 10px 22px oklch(0.52 0.09 28 / 0.3);
+}
+
+.signin-google-button:hover:not(:disabled) {
+  filter: saturate(1.08);
+  transform: translateY(-1px);
+}
+
+.signin-google-button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px oklch(0.84 0.1 38 / 0.5),
+    0 10px 20px oklch(0.52 0.09 30 / 0.34);
+}
+
+.signin-error {
+  margin-top: 1rem;
+  border-radius: 0.95rem;
+  border: 1px solid oklch(0.76 0.15 18 / 0.45);
+  background: oklch(0.98 0.04 18 / 0.86);
+  color: oklch(0.5 0.16 20);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  padding: 0.7rem 0.8rem;
+}
+
+@media (max-width: 949px) {
+  .signin-intro {
+    text-align: center;
+  }
+
+  .signin-brand {
+    justify-content: center;
+  }
+}
+
+@media (min-width: 950px) {
+  .signin-grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    align-items: stretch;
+    gap: 1.3rem;
+  }
+}
