@@ -6,6 +6,7 @@ import {
   getDictionaryDefinitions,
   type DictionaryDefinition,
 } from "@/lib/dictionary";
+import { buildUnauthorizedJson, getServerSession } from "@/lib/session";
 import { MarkedWordParseError, parseMarkedWord } from "@/lib/parse-marked-word";
 
 type DefineRequestBody = {
@@ -129,6 +130,10 @@ function parseStructuredDefinition(rawText: string): StructuredDefinition | null
 }
 
 export async function POST(request: Request) {
+  if (!(await getServerSession(request.headers))) {
+    return buildUnauthorizedJson();
+  }
+
   let body: DefineRequestBody;
   try {
     body = (await request.json()) as DefineRequestBody;
