@@ -1,21 +1,8 @@
-import { Fraunces, Manrope } from "next/font/google";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { GoogleSignInCard } from "@/components/auth/google-sign-in-card";
 import { getServerSession, sanitizeCallbackURL } from "@/lib/session";
-
-const headlineFont = Fraunces({
-  subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-signin-headline",
-});
-
-const bodyFont = Manrope({
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
-  variable: "--font-signin-body",
-});
 
 type SignInPageProps = {
   searchParams: Promise<{
@@ -34,7 +21,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   }
 
   return (
-    <main className={`signin-shell ${headlineFont.variable} ${bodyFont.variable}`}>
+    <main className="signin-shell">
       <section className="signin-grid">
         <div className="signin-intro">
           <div className="signin-brand">
