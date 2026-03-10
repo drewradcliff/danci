@@ -1,5 +1,13 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  index,
+  jsonb,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -73,9 +81,56 @@ export const verification = pgTable(
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
+export const lookupHistory = pgTable(
+  "lookup_history",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    phraseInput: text("phrase_input").notNull(),
+    targetText: text("target_text").notNull(),
+    contextText: text("context_text").notNull(),
+    resultJson: jsonb("result_json").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("lookup_history_user_created_idx").on(table.userId, table.createdAt, table.id),
+  ],
+);
+
+export const flashcard = pgTable(
+  "flashcard",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    lookupHistoryId: text("lookup_history_id").references(() => lookupHistory.id, {
+      onDelete: "set null",
+    }),
+    term: text("term").notNull(),
+    normalizedTerm: text("normalized_term").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("flashcard_user_normalized_unique").on(
+      table.userId,
+      table.normalizedTerm,
+    ),
+    index("flashcard_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
+  lookupHistory: many(lookupHistory),
+  flashcards: many(flashcard),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -89,5 +144,24 @@ export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, {
     fields: [account.userId],
     references: [user.id],
+  }),
+}));
+
+export const lookupHistoryRelations = relations(lookupHistory, ({ one, many }) => ({
+  user: one(user, {
+    fields: [lookupHistory.userId],
+    references: [user.id],
+  }),
+  flashcards: many(flashcard),
+}));
+
+export const flashcardRelations = relations(flashcard, ({ one }) => ({
+  user: one(user, {
+    fields: [flashcard.userId],
+    references: [user.id],
+  }),
+  lookupHistory: one(lookupHistory, {
+    fields: [flashcard.lookupHistoryId],
+    references: [lookupHistory.id],
   }),
 }));

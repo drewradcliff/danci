@@ -1,13 +1,16 @@
 import { generateText } from "ai";
 import { NextResponse } from "next/server";
 
+import { db } from "@/db";
+import { lookupHistory } from "@/db/schema";
 import {
   DictionaryError,
   getDictionaryDefinitions,
   type DictionaryDefinition,
 } from "@/lib/dictionary";
+import { getHistoryResultPreview } from "@/lib/history";
 import { buildUnauthorizedJson, getServerSession } from "@/lib/session";
-import { MarkedWordParseError, parseMarkedWord } from "@/lib/parse-marked-word";
+import { parseMarkedWord } from "@/lib/parse-marked-word";
 
 type DefineRequestBody = {
   phrase?: unknown;
@@ -42,6 +45,29 @@ type StructuredDefinition = {
   examples: string[];
 };
 
+type HistoryResultJson = {
+  structured: StructuredDefinition | null;
+  fallbackText: string | null;
+  word?: string;
+  definition?: {
+    meaning: string;
+    examples: string[];
+  };
+  meta: {
+    definitionsFound: number;
+    dictionaryLookupFailed: boolean;
+    dictionaryErrorCode: DictionaryError["code"] | "INTERNAL_ERROR" | null;
+    usedFallback: boolean;
+    jsonParseFailed: boolean;
+  };
+};
+
+type SessionWithUserId = {
+  user?: {
+    id?: string;
+  };
+};
+
 function hasListPrefix(value: string): boolean {
   return /^\s*(?:[-*•]|\d+[.)])\s+/.test(value);
 }
@@ -51,16 +77,21 @@ function buildStructuredPrompt(
   word: string,
   definitions: DictionaryDefinition[],
 ): string {
-  const candidates = definitions
-    .map((definition, index) => {
-      const examples =
-        definition.examples.length > 0
-          ? `\nExamples:\n${definition.examples.map((example) => `- ${example}`).join("\n")}`
-          : "";
+  const candidates =
+    definitions.length > 0
+      ? definitions
+          .map((definition, index) => {
+            const examples =
+              definition.examples.length > 0
+                ? `\nExamples:\n${definition.examples
+                    .map((example) => `- ${example}`)
+                    .join("\n")}`
+                : "";
 
-      return `${index}: ${definition.meaning}${examples}`;
-    })
-    .join("\n\n");
+            return `${index}: ${definition.meaning}${examples}`;
+          })
+          .join("\n\n")
+      : "No dictionary candidates available.";
 
   return [
     "Pick the dictionary sense that best matches the marked word in context.",
@@ -77,6 +108,7 @@ function buildStructuredPrompt(
     "- meaning must be one short sentence.",
     "- examples must contain 2 to 4 short plain-text phrases or sentences.",
     "- examples should use similar usage contexts for the target word.",
+    "- If no candidate definitions are available, infer a best-fit meaning from context.",
     "- Do not include numbering or bullet characters in strings.",
     "- Preserve the original word casing from the target word.",
     "- Do not include markdown or any keys other than word, meaning, examples.",
@@ -129,8 +161,20 @@ function parseStructuredDefinition(rawText: string): StructuredDefinition | null
   };
 }
 
+function buildHistoryRecordId(): string {
+  return crypto.randomUUID();
+}
+
+function getSessionUserId(session: unknown): string | null {
+  const userId = (session as SessionWithUserId | null)?.user?.id;
+  return typeof userId === "string" && userId.trim() ? userId : null;
+}
+
 export async function POST(request: Request) {
-  if (!(await getServerSession(request.headers))) {
+  const session = await getServerSession(request.headers);
+  const userId = getSessionUserId(session);
+
+  if (!session || !userId) {
     return buildUnauthorizedJson();
   }
 
@@ -150,35 +194,18 @@ export async function POST(request: Request) {
   }
 
   const normalizedPhrase = body.phrase.trim();
+  const parsed = parseMarkedWord(normalizedPhrase);
 
-  let parsed;
-  try {
-    parsed = parseMarkedWord(normalizedPhrase);
-  } catch (error) {
-    if (error instanceof MarkedWordParseError) {
-      return errorResponse(400, error.code, error.message);
-    }
-
-    return errorResponse(500, "INTERNAL_ERROR", "Unexpected parsing failure.");
-  }
-
-  let definitions: DictionaryDefinition[];
+  let definitions: DictionaryDefinition[] = [];
+  let dictionaryErrorCode: DictionaryError["code"] | "INTERNAL_ERROR" | null = null;
   try {
     definitions = await getDictionaryDefinitions(parsed.word);
   } catch (error) {
     if (error instanceof DictionaryError) {
-      if (error.code === "WORD_NOT_FOUND") {
-        return errorResponse(404, error.code, error.message);
-      }
-
-      return errorResponse(502, error.code, error.message);
+      dictionaryErrorCode = error.code;
+    } else {
+      dictionaryErrorCode = "INTERNAL_ERROR";
     }
-
-    return errorResponse(
-      500,
-      "INTERNAL_ERROR",
-      "Unexpected dictionary lookup failure.",
-    );
   }
 
   let usedFallback = true;
@@ -201,9 +228,13 @@ export async function POST(request: Request) {
   }
 
   const selectedDefinition = definitions[0];
-  const fallbackText = jsonParseFailed ? rawModelOutput : null;
+  const fallbackText =
+    jsonParseFailed && rawModelOutput
+      ? rawModelOutput
+      : selectedDefinition?.meaning ??
+        `No dictionary match found for "${parsed.word}", but it appears in this context: "${parsed.context}".`;
 
-  return NextResponse.json({
+  const responsePayload = {
     phrase: parsed.phrase,
     context: parsed.context,
     structured,
@@ -213,8 +244,61 @@ export async function POST(request: Request) {
     definition: selectedDefinition,
     meta: {
       definitionsFound: definitions.length,
+      dictionaryLookupFailed: dictionaryErrorCode !== null,
+      dictionaryErrorCode,
       usedFallback,
       jsonParseFailed,
     },
+  };
+
+  const resultJson: HistoryResultJson = {
+    structured: responsePayload.structured,
+    fallbackText: responsePayload.fallbackText,
+    word: responsePayload.word,
+    definition: responsePayload.definition,
+    meta: responsePayload.meta,
+  };
+
+  let historyItem:
+    | {
+        id: string;
+        phraseInput: string;
+        targetText: string;
+        contextText: string;
+        resultPreview: string | null;
+        createdAt: string;
+        flashcard: null;
+      }
+    | null = null;
+
+  try {
+    const historyRecordId = buildHistoryRecordId();
+    const createdAt = new Date().toISOString();
+
+    await db.insert(lookupHistory).values({
+      id: historyRecordId,
+      userId,
+      phraseInput: responsePayload.phrase,
+      targetText: responsePayload.word,
+      contextText: responsePayload.context,
+      resultJson,
+    });
+
+    historyItem = {
+      id: historyRecordId,
+      phraseInput: responsePayload.phrase,
+      targetText: responsePayload.word,
+      contextText: responsePayload.context,
+      resultPreview: getHistoryResultPreview(resultJson),
+      createdAt,
+      flashcard: null,
+    };
+  } catch (error) {
+    console.error("Failed to persist lookup history", error);
+  }
+
+  return NextResponse.json({
+    ...responsePayload,
+    historyItem,
   });
 }
