@@ -138,7 +138,7 @@ export function DefineForm() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isHistoryLoadingMore, setIsHistoryLoadingMore] = useState(false);
-  const [addingHistoryId, setAddingHistoryId] = useState<string | null>(null);
+  const [historyActionId, setHistoryActionId] = useState<string | null>(null);
   const [flashcards, setFlashcards] = useState<FlashcardItem[]>([]);
   const [flashcardsError, setFlashcardsError] = useState<string | null>(null);
   const [isFlashcardsLoading, setIsFlashcardsLoading] = useState(false);
@@ -263,11 +263,11 @@ export function DefineForm() {
   }
 
   async function addFlashcard(item: HistoryItem) {
-    if (addingHistoryId || item.flashcard) {
+    if (historyActionId || item.flashcard) {
       return;
     }
 
-    setAddingHistoryId(item.id);
+    setHistoryActionId(item.id);
     setHistoryError(null);
     setFlashcardsError(null);
 
@@ -334,16 +334,22 @@ export function DefineForm() {
     } catch {
       setHistoryError("Network error while adding flashcard.");
     } finally {
-      setAddingHistoryId(null);
+      setHistoryActionId(null);
     }
   }
 
-  async function removeFlashcard(card: FlashcardItem) {
-    if (removingFlashcardId) {
+  async function removeFlashcardById(
+    flashcardId: string,
+    options?: { historyId?: string; fromFlashcardsView?: boolean },
+  ) {
+    if (removingFlashcardId || historyActionId) {
       return;
     }
 
-    setRemovingFlashcardId(card.id);
+    if (options?.historyId) {
+      setHistoryActionId(options.historyId);
+    }
+    setRemovingFlashcardId(flashcardId);
     setFlashcardsError(null);
     setHistoryError(null);
 
@@ -353,7 +359,7 @@ export function DefineForm() {
         headers: {
           "content-type": "application/json",
         },
-        body: JSON.stringify({ flashcardId: card.id }),
+        body: JSON.stringify({ flashcardId }),
       });
 
       const payload = (await response.json()) as RemoveFlashcardSuccess | DefineApiError;
@@ -365,10 +371,10 @@ export function DefineForm() {
         return;
       }
 
-      setFlashcards((current) => current.filter((item) => item.id !== card.id));
+      setFlashcards((current) => current.filter((item) => item.id !== flashcardId));
       setHistoryItems((current) =>
         current.map((item) =>
-          item.flashcard?.id === card.id
+          item.flashcard?.id === flashcardId
             ? {
                 ...item,
                 flashcard: null,
@@ -376,12 +382,26 @@ export function DefineForm() {
             : item,
         ),
       );
-      setExpandedFlashcardId((current) => (current === card.id ? null : current));
+      setExpandedFlashcardId((current) => (current === flashcardId ? null : current));
     } catch {
-      setFlashcardsError("Network error while removing flashcard.");
+      if (options?.fromFlashcardsView) {
+        setFlashcardsError("Network error while removing flashcard.");
+      } else {
+        setHistoryError("Network error while removing flashcard.");
+      }
     } finally {
       setRemovingFlashcardId(null);
+      setHistoryActionId(null);
     }
+  }
+
+  async function toggleHistoryFlashcard(item: HistoryItem) {
+    if (item.flashcard) {
+      await removeFlashcardById(item.flashcard.id, { historyId: item.id });
+      return;
+    }
+
+    await addFlashcard(item);
   }
 
   useEffect(() => {
@@ -607,12 +627,15 @@ export function DefineForm() {
                     size="sm"
                     variant={item.flashcard ? "secondary" : "outline"}
                     className="rounded-xl"
-                    disabled={addingHistoryId === item.id || item.flashcard !== null}
+                    disabled={
+                      historyActionId === item.id ||
+                      (item.flashcard ? removingFlashcardId === item.flashcard.id : false)
+                    }
                     onClick={() => {
-                      void addFlashcard(item);
+                      void toggleHistoryFlashcard(item);
                     }}
                   >
-                    {item.flashcard ? "Added" : "Add Flashcards"}
+                    {item.flashcard ? "Added" : "Add Flashcard"}
                   </Button>
                 </div>
               </article>
@@ -691,7 +714,7 @@ export function DefineForm() {
                       className="rounded-xl"
                       disabled={removingFlashcardId === card.id}
                       onClick={() => {
-                        void removeFlashcard(card);
+                        void removeFlashcardById(card.id, { fromFlashcardsView: true });
                       }}
                     >
                       Remove
@@ -742,6 +765,16 @@ export function DefineForm() {
                           </div>
                         </div>
                       )}
+
+                      <div className="mt-3">
+                        <p className="home-result-label">Original Sentence</p>
+                        <p className="text-sm leading-[1.6] text-slate-700">
+                          {renderHighlightedSentence(
+                            card.content.phraseInput,
+                            card.content.targetText,
+                          )}
+                        </p>
+                      </div>
                     </div>
                   ) : null}
                 </article>
