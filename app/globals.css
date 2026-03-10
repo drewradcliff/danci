@@ -245,7 +245,9 @@
 
 .signin-title {
   margin-top: 0.95rem;
-  font-family: var(--font-signin-headline), serif;
+  font-family: var(--font-signin-script), var(--font-signin-headline), serif;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   font-size: clamp(2.05rem, 6vw, 3.45rem);
   line-height: 0.97;
   color: var(--signin-ink);

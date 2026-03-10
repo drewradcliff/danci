@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { Fraunces, Geist, Geist_Mono, Manrope } from "next/font/google";
+import {
+  Dancing_Script,
+  Fraunces,
+  Geist,
+  Geist_Mono,
+  Manrope,
+} from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,6 +30,12 @@ const bodyFont = Manrope({
   variable: "--font-signin-body",
 });
 
+const scriptFont = Dancing_Script({
+  subsets: ["latin"],
+  weight: ["600", "700"],
+  variable: "--font-signin-script",
+});
+
 export const metadata: Metadata = {
   title: "danci",
 };
@@ -36,7 +48,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${headlineFont.variable} ${bodyFont.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${headlineFont.variable} ${bodyFont.variable} ${scriptFont.variable} antialiased`}
       >
         {children}
       </body>
