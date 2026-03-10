@@ -30,7 +30,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
             </span>
             <p className="signin-kicker">Dāncí</p>
           </div>
-          <h1 className="signin-title">A Cozy Home For Every Word</h1>
+          <h1 className="signin-title">Contextual Dictionary</h1>
           <p className="signin-subtitle">
             A soft little workspace for collecting meanings and examples. Sign in once
             to unlock your private word garden.

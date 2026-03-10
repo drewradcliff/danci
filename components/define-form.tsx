@@ -56,13 +56,47 @@ type HistoryApiSuccess = {
 
 type ToggleFlashcardSuccess = {
   active: boolean;
+  alreadyExisted?: boolean;
   flashcardId?: string;
+  term?: string;
 };
 
 type PreviewParts = {
   before: string;
   marked: string;
   after: string;
+};
+
+type FlashcardItem = {
+  id: string;
+  term: string;
+  lookupHistoryId: string | null;
+  createdAt: string;
+  content: {
+    phraseInput: string;
+    targetText: string;
+    word: string | null;
+    structured: {
+      word: string;
+      meaning: string;
+      examples: string[];
+    } | null;
+    fallbackText: string | null;
+    definition: {
+      meaning: string;
+      examples: string[];
+    } | null;
+    resultPreview: string | null;
+  } | null;
+};
+
+type FlashcardsApiSuccess = {
+  items: FlashcardItem[];
+};
+
+type RemoveFlashcardSuccess = {
+  removed: boolean;
+  flashcardId: string;
 };
 
 function getPreviewParts(phrase: string): PreviewParts | null {
@@ -92,7 +126,9 @@ function getPreviewParts(phrase: string): PreviewParts | null {
 }
 
 export function DefineForm() {
-  const [activeView, setActiveView] = useState<"define" | "history">("define");
+  const [activeView, setActiveView] = useState<"define" | "history" | "flashcards">(
+    "define",
+  );
   const [phrase, setPhrase] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +138,12 @@ export function DefineForm() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isHistoryLoadingMore, setIsHistoryLoadingMore] = useState(false);
-  const [togglingHistoryId, setTogglingHistoryId] = useState<string | null>(null);
+  const [historyActionId, setHistoryActionId] = useState<string | null>(null);
+  const [flashcards, setFlashcards] = useState<FlashcardItem[]>([]);
+  const [flashcardsError, setFlashcardsError] = useState<string | null>(null);
+  const [isFlashcardsLoading, setIsFlashcardsLoading] = useState(false);
+  const [removingFlashcardId, setRemovingFlashcardId] = useState<string | null>(null);
+  const [expandedFlashcardId, setExpandedFlashcardId] = useState<string | null>(null);
   const preview = getPreviewParts(phrase);
 
   function adjustTextareaHeight(textarea: HTMLTextAreaElement) {
@@ -121,31 +162,6 @@ export function DefineForm() {
       seen.add(item.id);
       return true;
     });
-  }
-
-  function formatTimestamp(value: string): string {
-    const timestamp = new Date(value);
-    if (Number.isNaN(timestamp.getTime())) {
-      return value;
-    }
-
-    const diffMs = timestamp.getTime() - Date.now();
-    const diffMinutes = Math.round(diffMs / 60000);
-    const absMinutes = Math.abs(diffMinutes);
-    const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
-    if (absMinutes < 60) {
-      return rtf.format(diffMinutes, "minute");
-    }
-
-    const diffHours = Math.round(diffMinutes / 60);
-    const absHours = Math.abs(diffHours);
-    if (absHours < 24) {
-      return rtf.format(diffHours, "hour");
-    }
-
-    const diffDays = Math.round(diffHours / 24);
-    return rtf.format(diffDays, "day");
   }
 
   async function loadHistory(options?: { cursor?: string | null; append?: boolean }) {
@@ -192,33 +208,71 @@ export function DefineForm() {
     }
   }
 
-  async function toggleFlashcard(item: HistoryItem) {
-    if (togglingHistoryId) {
+  function renderHighlightedSentence(phraseText: string, targetText: string) {
+    const marked = getPreviewParts(phraseText);
+    if (marked) {
+      return (
+        <span>
+          {marked.before}
+          <span className="home-preview-mark">{marked.marked}</span>
+          {marked.after}
+        </span>
+      );
+    }
+
+    const index = phraseText.toLowerCase().indexOf(targetText.toLowerCase());
+    if (index === -1 || !targetText.trim()) {
+      return <span>{phraseText}</span>;
+    }
+
+    const before = phraseText.slice(0, index);
+    const match = phraseText.slice(index, index + targetText.length);
+    const after = phraseText.slice(index + targetText.length);
+
+    return (
+      <span>
+        {before}
+        <span className="home-preview-mark">{match}</span>
+        {after}
+      </span>
+    );
+  }
+
+  async function loadFlashcards() {
+    setIsFlashcardsLoading(true);
+    setFlashcardsError(null);
+
+    try {
+      const response = await fetch("/api/flashcards");
+      const payload = (await response.json()) as FlashcardsApiSuccess | DefineApiError;
+
+      if (!response.ok) {
+        const fallbackMessage = "Unable to load flashcards.";
+        setFlashcardsError(
+          "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage,
+        );
+        return;
+      }
+
+      setFlashcards((payload as FlashcardsApiSuccess).items);
+    } catch {
+      setFlashcardsError("Network error while loading flashcards.");
+    } finally {
+      setIsFlashcardsLoading(false);
+    }
+  }
+
+  async function addFlashcard(item: HistoryItem) {
+    if (historyActionId || item.flashcard) {
       return;
     }
 
-    setTogglingHistoryId(item.id);
+    setHistoryActionId(item.id);
     setHistoryError(null);
-
-    const previousItems = historyItems;
-    const nextActive = item.flashcard === null;
-    const optimistic = historyItems.map((historyItem) =>
-      historyItem.id === item.id
-        ? {
-            ...historyItem,
-            flashcard: nextActive
-              ? {
-                  id: historyItem.flashcard?.id ?? `pending-${historyItem.id}`,
-                  term: historyItem.targetText,
-                }
-              : null,
-          }
-        : historyItem,
-    );
-    setHistoryItems(optimistic);
+    setFlashcardsError(null);
 
     try {
-      const response = await fetch("/api/flashcards/toggle", {
+      const response = await fetch("/api/flashcards", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -228,41 +282,137 @@ export function DefineForm() {
 
       const payload = (await response.json()) as ToggleFlashcardSuccess | DefineApiError;
       if (!response.ok) {
-        const fallbackMessage = "Unable to toggle flashcard.";
-        setHistoryItems(previousItems);
+        const fallbackMessage = "Unable to add flashcard.";
         setHistoryError(
           "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage,
         );
         return;
       }
 
-      const togglePayload = payload as ToggleFlashcardSuccess;
+      const addPayload = payload as ToggleFlashcardSuccess;
+      const flashcardId = addPayload.flashcardId ?? `flashcard-${item.id}`;
+      const term = addPayload.term ?? item.targetText;
+
       setHistoryItems((current) =>
         current.map((historyItem) =>
           historyItem.id === item.id
             ? {
                 ...historyItem,
-                flashcard: togglePayload.active
-                  ? {
-                      id: togglePayload.flashcardId ?? historyItem.flashcard?.id ?? item.id,
-                      term: historyItem.targetText,
-                    }
-                  : null,
+                flashcard: {
+                  id: flashcardId,
+                  term,
+                },
               }
             : historyItem,
         ),
       );
+
+      setFlashcards((current) => {
+        if (current.some((card) => card.id === flashcardId)) {
+          return current;
+        }
+
+        return [
+          {
+            id: flashcardId,
+            term,
+            lookupHistoryId: item.id,
+            createdAt: new Date().toISOString(),
+            content: {
+              phraseInput: item.phraseInput,
+              targetText: item.targetText,
+              word: item.targetText,
+              structured: null,
+              fallbackText: item.resultPreview,
+              definition: null,
+              resultPreview: item.resultPreview,
+            },
+          },
+          ...current,
+        ];
+      });
     } catch {
-      setHistoryItems(previousItems);
-      setHistoryError("Network error while toggling flashcard.");
+      setHistoryError("Network error while adding flashcard.");
     } finally {
-      setTogglingHistoryId(null);
+      setHistoryActionId(null);
     }
+  }
+
+  async function removeFlashcardById(
+    flashcardId: string,
+    options?: { historyId?: string; fromFlashcardsView?: boolean },
+  ) {
+    if (removingFlashcardId || historyActionId) {
+      return;
+    }
+
+    if (options?.historyId) {
+      setHistoryActionId(options.historyId);
+    }
+    setRemovingFlashcardId(flashcardId);
+    setFlashcardsError(null);
+    setHistoryError(null);
+
+    try {
+      const response = await fetch("/api/flashcards", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ flashcardId }),
+      });
+
+      const payload = (await response.json()) as RemoveFlashcardSuccess | DefineApiError;
+      if (!response.ok) {
+        const fallbackMessage = "Unable to remove flashcard.";
+        setFlashcardsError(
+          "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage,
+        );
+        return;
+      }
+
+      setFlashcards((current) => current.filter((item) => item.id !== flashcardId));
+      setHistoryItems((current) =>
+        current.map((item) =>
+          item.flashcard?.id === flashcardId
+            ? {
+                ...item,
+                flashcard: null,
+              }
+            : item,
+        ),
+      );
+      setExpandedFlashcardId((current) => (current === flashcardId ? null : current));
+    } catch {
+      if (options?.fromFlashcardsView) {
+        setFlashcardsError("Network error while removing flashcard.");
+      } else {
+        setHistoryError("Network error while removing flashcard.");
+      }
+    } finally {
+      setRemovingFlashcardId(null);
+      setHistoryActionId(null);
+    }
+  }
+
+  async function toggleHistoryFlashcard(item: HistoryItem) {
+    if (item.flashcard) {
+      await removeFlashcardById(item.flashcard.id, { historyId: item.id });
+      return;
+    }
+
+    await addFlashcard(item);
   }
 
   useEffect(() => {
     void loadHistory();
   }, []);
+
+  useEffect(() => {
+    if (activeView === "flashcards" && flashcards.length === 0 && !isFlashcardsLoading) {
+      void loadFlashcards();
+    }
+  }, [activeView, flashcards.length, isFlashcardsLoading]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -311,17 +461,13 @@ export function DefineForm() {
 
   return (
     <section className="home-workspace">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <p className="signin-kicker signin-kicker-soft">Word Desk</p>
-          <h2 className="home-label">Define or browse history</h2>
-        </div>
-        <div className="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
+      <div className="w-full rounded-2xl border border-slate-200 bg-white/80 p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        <div className="grid grid-cols-3 gap-1">
           <Button
             type="button"
-            size="sm"
+            size="lg"
             variant={activeView === "define" ? "default" : "ghost"}
-            className="rounded-full"
+            className="h-11 rounded-xl text-base font-semibold"
             onClick={() => {
               setActiveView("define");
             }}
@@ -330,14 +476,25 @@ export function DefineForm() {
           </Button>
           <Button
             type="button"
-            size="sm"
+            size="lg"
             variant={activeView === "history" ? "default" : "ghost"}
-            className="rounded-full"
+            className="h-11 rounded-xl text-base font-semibold"
             onClick={() => {
               setActiveView("history");
             }}
           >
             History
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            variant={activeView === "flashcards" ? "default" : "ghost"}
+            className="h-11 rounded-xl text-base font-semibold"
+            onClick={() => {
+              setActiveView("flashcards");
+            }}
+          >
+            Flashcards
           </Button>
         </div>
       </div>
@@ -435,7 +592,7 @@ export function DefineForm() {
             <div>
               <p className="home-result-label !mb-1">Recent Lookups</p>
               <p className="text-sm text-slate-600">
-                Every successful lookup appears here, newest first.
+                Sentence + add button only.
               </p>
             </div>
             {isHistoryLoading ? (
@@ -461,28 +618,26 @@ export function DefineForm() {
                 key={item.id}
                 className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-slate-800">{item.targetText}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">{formatTimestamp(item.createdAt)}</p>
-                  </div>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm leading-[1.6] text-slate-700">
+                    {renderHighlightedSentence(item.phraseInput, item.targetText)}
+                  </p>
                   <Button
                     type="button"
                     size="sm"
-                    variant={item.flashcard ? "default" : "outline"}
+                    variant={item.flashcard ? "secondary" : "outline"}
                     className="rounded-xl"
-                    disabled={togglingHistoryId === item.id}
+                    disabled={
+                      historyActionId === item.id ||
+                      (item.flashcard ? removingFlashcardId === item.flashcard.id : false)
+                    }
                     onClick={() => {
-                      void toggleFlashcard(item);
+                      void toggleHistoryFlashcard(item);
                     }}
                   >
-                    {item.flashcard ? "Flashcard Added" : "Add Flashcard"}
+                    {item.flashcard ? "Added" : "Add Flashcard"}
                   </Button>
                 </div>
-                <p className="mt-2 text-sm leading-[1.55] text-slate-700">
-                  {item.resultPreview ?? "No preview available."}
-                </p>
-                <p className="mt-1.5 text-xs text-slate-500">{item.phraseInput}</p>
               </article>
             ))}
           </div>
@@ -501,6 +656,131 @@ export function DefineForm() {
               </Button>
             </div>
           ) : null}
+        </section>
+      ) : null}
+
+      {activeView === "flashcards" ? (
+        <section className="mt-4 rounded-2xl border border-slate-200/85 bg-white/75 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="home-result-label !mb-1">Flashcards</p>
+              <p className="text-sm text-slate-600">
+                Tap a word to reveal its saved content.
+              </p>
+            </div>
+            {isFlashcardsLoading ? (
+              <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                Loading...
+              </span>
+            ) : null}
+          </div>
+
+          {flashcardsError ? (
+            <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {flashcardsError}
+            </p>
+          ) : null}
+
+          {!isFlashcardsLoading && flashcards.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-600">
+              No flashcards yet. Add one from history.
+            </p>
+          ) : null}
+
+          <div className="mt-3 flex flex-col gap-3">
+            {flashcards.map((card) => {
+              const isExpanded = expandedFlashcardId === card.id;
+              return (
+                <article
+                  key={card.id}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      onClick={() => {
+                        setExpandedFlashcardId((current) =>
+                          current === card.id ? null : card.id,
+                        );
+                      }}
+                    >
+                      <p className="text-lg font-semibold text-slate-800">{card.term}</p>
+                    </button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="rounded-xl"
+                      disabled={removingFlashcardId === card.id}
+                      onClick={() => {
+                        void removeFlashcardById(card.id, { fromFlashcardsView: true });
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+
+                  {isExpanded && card.content ? (
+                    <div className="mt-2.5 border-t border-slate-200 pt-2.5">
+                      {card.content.structured ? (
+                        <div className="home-result">
+                          <div className="home-result-block mt-[14px] first:mt-0">
+                            <div className="home-result-label">Word</div>
+                            <div className="home-result-word">{card.content.structured.word}</div>
+                          </div>
+
+                          <div className="home-result-block mt-[14px] first:mt-0">
+                            <div className="home-result-label">Meaning</div>
+                            <div className="leading-[1.6]">{card.content.structured.meaning}</div>
+                          </div>
+
+                          <div className="home-result-block mt-[14px] first:mt-0">
+                            <div className="home-result-label">More Use Cases Alike</div>
+                            <ul className="home-result-list">
+                              {card.content.structured.examples.map((example, index) => (
+                                <li key={`${example}-${index}`} className="mb-[6px]">
+                                  {example}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="home-result">
+                          <div className="home-result-block mt-[14px] first:mt-0">
+                            <div className="home-result-label">Word</div>
+                            <div className="home-result-word">
+                              {card.content.word ?? card.content.targetText}
+                            </div>
+                          </div>
+                          <div className="home-result-block mt-[14px] first:mt-0">
+                            <div className="home-result-label">Meaning</div>
+                            <div className="leading-[1.6]">
+                              {card.content.fallbackText ??
+                                card.content.definition?.meaning ??
+                                card.content.resultPreview ??
+                                "No saved content available."}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-3">
+                        <p className="home-result-label">Original Sentence</p>
+                        <p className="text-sm leading-[1.6] text-slate-700">
+                          {renderHighlightedSentence(
+                            card.content.phraseInput,
+                            card.content.targetText,
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
         </section>
       ) : null}
     </section>
