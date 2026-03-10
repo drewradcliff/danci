@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { generateText, LanguageModel } from "ai";
 import { NextResponse } from "next/server";
 
 import { db } from "@/db";
@@ -45,6 +45,11 @@ type StructuredDefinition = {
   examples: string[];
 };
 
+const DEFINE_SYSTEM_PROMPT =
+  "You are selecting the correct meaning of a word from candidate definitions.";
+
+const DEFINE_MODEL: LanguageModel = "google/gemini-2.5-flash-lite";
+
 type HistoryResultJson = {
   structured: StructuredDefinition | null;
   fallbackText: string | null;
@@ -72,6 +77,13 @@ function hasListPrefix(value: string): boolean {
   return /^\s*(?:[-*•]|\d+[.)])\s+/.test(value);
 }
 
+function normalizeJsonResponse(rawText: string): string {
+  const trimmed = rawText.trim();
+
+  const fencedMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fencedMatch ? fencedMatch[1].trim() : trimmed;
+}
+
 function buildStructuredPrompt(
   context: string,
   word: string,
@@ -88,38 +100,43 @@ function buildStructuredPrompt(
                     .join("\n")}`
                 : "";
 
-            return `${index}: ${definition.meaning}${examples}`;
+            return `${index + 1}. ${definition.meaning}${examples}`;
           })
           .join("\n\n")
       : "No dictionary candidates available.";
 
   return [
-    "Pick the dictionary sense that best matches the marked word in context.",
-    `Context sentence: "${context}"`,
+    "TASK",
+    "Choose the definition that best matches the target word used in the sentence.",
+    "",
+    "INPUT",
+    `Sentence: "${context}"`,
     `Target word: "${word}"`,
     "",
     "Candidate definitions:",
     candidates,
     "",
-    "Return JSON only in this exact shape:",
-    '{ "word": "...", "meaning": "...", "examples": ["...", "...", "..."] }',
+    "OUTPUT",
+    "Return JSON only:",
+    '{ "word": "...", "meaning": "...", "examples": ["...", "..."] }',
     "",
-    "Rules:",
-    "- meaning must be one short sentence.",
-    "- examples must contain 2 to 4 short plain-text phrases or sentences.",
-    "- examples should use similar usage contexts for the target word.",
-    "- If no candidate definitions are available, infer a best-fit meaning from context.",
-    "- Do not include numbering or bullet characters in strings.",
-    "- Preserve the original word casing from the target word.",
-    "- Do not include markdown or any keys other than word, meaning, examples.",
+    "CONSTRAINTS",
+    "- meaning: one short sentence describing the chosen definition.",
+    "- examples: 2 short phrases or sentences using the exact target word.",
+    "- Examples should reflect similar usage as the sentence context.",
+    "- If none of the candidates fit, infer the meaning from context.",
+    "- Preserve the original casing of the target word.",
+    "- No numbering, bullets, markdown, or extra keys.",
   ].join("\n");
 }
 
-function parseStructuredDefinition(rawText: string): StructuredDefinition | null {
+function parseStructuredDefinition(
+  rawText: string,
+): StructuredDefinition | null {
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(rawText);
+    parsed = JSON.parse(normalizeJsonResponse(rawText));
   } catch {
     return null;
   }
@@ -146,7 +163,7 @@ function parseStructuredDefinition(rawText: string): StructuredDefinition | null
     .map((item) => item.trim())
     .filter(Boolean);
 
-  if (examples.length < 2 || examples.length > 4) {
+  if (examples.length !== 2) {
     return null;
   }
 
@@ -197,7 +214,8 @@ export async function POST(request: Request) {
   const parsed = parseMarkedWord(normalizedPhrase);
 
   let definitions: DictionaryDefinition[] = [];
-  let dictionaryErrorCode: DictionaryError["code"] | "INTERNAL_ERROR" | null = null;
+  let dictionaryErrorCode: DictionaryError["code"] | "INTERNAL_ERROR" | null =
+    null;
   try {
     definitions = await getDictionaryDefinitions(parsed.word);
   } catch (error) {
@@ -215,7 +233,8 @@ export async function POST(request: Request) {
 
   try {
     const aiResponse = await generateText({
-      model: "openai/gpt-5-mini",
+      model: DEFINE_MODEL,
+      system: DEFINE_SYSTEM_PROMPT,
       prompt: buildStructuredPrompt(parsed.context, parsed.word, definitions),
     });
 
@@ -231,8 +250,8 @@ export async function POST(request: Request) {
   const fallbackText =
     jsonParseFailed && rawModelOutput
       ? rawModelOutput
-      : selectedDefinition?.meaning ??
-        `No dictionary match found for "${parsed.word}", but it appears in this context: "${parsed.context}".`;
+      : (selectedDefinition?.meaning ??
+        `No dictionary match found for "${parsed.word}", but it appears in this context: "${parsed.context}".`);
 
   const responsePayload = {
     phrase: parsed.phrase,
@@ -259,17 +278,15 @@ export async function POST(request: Request) {
     meta: responsePayload.meta,
   };
 
-  let historyItem:
-    | {
-        id: string;
-        phraseInput: string;
-        targetText: string;
-        contextText: string;
-        resultPreview: string | null;
-        createdAt: string;
-        flashcard: null;
-      }
-    | null = null;
+  let historyItem: {
+    id: string;
+    phraseInput: string;
+    targetText: string;
+    contextText: string;
+    resultPreview: string | null;
+    createdAt: string;
+    flashcard: null;
+  } | null = null;
 
   try {
     const historyRecordId = buildHistoryRecordId();
