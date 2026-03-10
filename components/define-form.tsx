@@ -296,8 +296,9 @@ export function DefineForm() {
       setResult(successPayload);
       setActiveView("define");
 
-      if (successPayload.historyItem) {
-        setHistoryItems((previous) => mergeHistory(previous, [successPayload.historyItem]));
+      const historyItem = successPayload.historyItem;
+      if (historyItem) {
+        setHistoryItems((previous) => mergeHistory(previous, [historyItem]));
       } else {
         void loadHistory();
       }
