@@ -170,14 +170,31 @@ export async function DELETE(request: Request) {
     return errorResponse(400, "INVALID_REQUEST", "historyId is required.");
   }
 
-  const deleted = await db
+  const deletedHistory = await db
     .delete(lookupHistory)
     .where(and(eq(lookupHistory.id, historyId), eq(lookupHistory.userId, userId)))
-    .returning({ id: lookupHistory.id });
+    .returning({ id: lookupHistory.id, targetText: lookupHistory.targetText });
 
-  if (deleted.length === 0) {
+  if (deletedHistory.length === 0) {
     return errorResponse(404, "NOT_FOUND", "History entry not found.");
   }
 
-  return NextResponse.json({ removed: true, historyId });
+  const normalizedTerm = normalizeTerm(deletedHistory[0].targetText);
+  const flashcardDeleteWhere = normalizedTerm
+    ? and(
+        eq(flashcard.userId, userId),
+        or(eq(flashcard.lookupHistoryId, historyId), eq(flashcard.normalizedTerm, normalizedTerm)),
+      )
+    : and(eq(flashcard.userId, userId), eq(flashcard.lookupHistoryId, historyId));
+
+  const removedFlashcards = await db
+    .delete(flashcard)
+    .where(flashcardDeleteWhere)
+    .returning({ id: flashcard.id });
+
+  return NextResponse.json({
+    removed: true,
+    historyId,
+    removedFlashcardIds: removedFlashcards.map((entry) => entry.id),
+  });
 }

@@ -102,6 +102,7 @@ type RemoveFlashcardSuccess = {
 type DeleteHistorySuccess = {
   removed: boolean;
   historyId: string;
+  removedFlashcardIds?: string[];
 };
 
 function getPreviewParts(phrase: string): PreviewParts | null {
@@ -428,7 +429,29 @@ export function DefineForm() {
         return;
       }
 
-      setHistoryItems((current) => current.filter((item) => item.id !== historyId));
+      const removedFlashcardIds = new Set(
+        (payload as DeleteHistorySuccess).removedFlashcardIds ?? [],
+      );
+      setHistoryItems((current) =>
+        current
+          .filter((item) => item.id !== historyId)
+          .map((item) =>
+            item.flashcard && removedFlashcardIds.has(item.flashcard.id)
+              ? {
+                  ...item,
+                  flashcard: null,
+                }
+              : item,
+          ),
+      );
+      setFlashcards((current) =>
+        removedFlashcardIds.size > 0
+          ? current.filter((item) => !removedFlashcardIds.has(item.id))
+          : current.filter((item) => item.lookupHistoryId !== historyId),
+      );
+      setExpandedFlashcardId((current) =>
+        current && removedFlashcardIds.has(current) ? null : current,
+      );
     } catch {
       setHistoryError("Network error while deleting history entry.");
     } finally {
