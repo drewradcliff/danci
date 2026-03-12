@@ -902,6 +902,18 @@ export function DefineForm() {
                                 "No saved content available."}
                             </div>
                           </div>
+                          {card.content.definition?.examples.length ? (
+                            <div className="home-result-block mt-[14px] first:mt-0">
+                              <div className="home-result-label">More Use Cases Alike</div>
+                              <ul className="home-result-list">
+                                {card.content.definition.examples.map((example, index) => (
+                                  <li key={`${example}-${index}`} className="mb-[6px]">
+                                    {example}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
                         </div>
                       )}
 
