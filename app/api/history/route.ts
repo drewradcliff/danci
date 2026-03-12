@@ -145,3 +145,56 @@ export async function GET(request: Request) {
 
   return NextResponse.json({ items, nextCursor });
 }
+
+type DeleteHistoryRequest = {
+  historyId?: unknown;
+};
+
+export async function DELETE(request: Request) {
+  const session = await getServerSession(new Headers(request.headers));
+  const userId = getSessionUserId(session);
+
+  if (!session || !userId) {
+    return buildUnauthorizedJson();
+  }
+
+  let body: DeleteHistoryRequest;
+  try {
+    body = (await request.json()) as DeleteHistoryRequest;
+  } catch {
+    return errorResponse(400, "INVALID_REQUEST", "Invalid JSON body.");
+  }
+
+  const historyId = typeof body.historyId === "string" ? body.historyId.trim() : "";
+  if (!historyId) {
+    return errorResponse(400, "INVALID_REQUEST", "historyId is required.");
+  }
+
+  const deletedHistory = await db
+    .delete(lookupHistory)
+    .where(and(eq(lookupHistory.id, historyId), eq(lookupHistory.userId, userId)))
+    .returning({ id: lookupHistory.id, targetText: lookupHistory.targetText });
+
+  if (deletedHistory.length === 0) {
+    return errorResponse(404, "NOT_FOUND", "History entry not found.");
+  }
+
+  const normalizedTerm = normalizeTerm(deletedHistory[0].targetText);
+  const flashcardDeleteWhere = normalizedTerm
+    ? and(
+        eq(flashcard.userId, userId),
+        or(eq(flashcard.lookupHistoryId, historyId), eq(flashcard.normalizedTerm, normalizedTerm)),
+      )
+    : and(eq(flashcard.userId, userId), eq(flashcard.lookupHistoryId, historyId));
+
+  const removedFlashcards = await db
+    .delete(flashcard)
+    .where(flashcardDeleteWhere)
+    .returning({ id: flashcard.id });
+
+  return NextResponse.json({
+    removed: true,
+    historyId,
+    removedFlashcardIds: removedFlashcards.map((entry) => entry.id),
+  });
+}

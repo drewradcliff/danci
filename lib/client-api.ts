@@ -86,6 +86,12 @@ export type RemoveFlashcardSuccess = {
   flashcardId: string;
 };
 
+export type DeleteHistorySuccess = {
+  removed: boolean;
+  historyId: string;
+  removedFlashcardIds?: string[];
+};
+
 export class ApiClientError extends Error {
   status: number;
   code: string;
@@ -191,5 +197,15 @@ export async function removeFlashcard(flashcardId: string) {
       "content-type": "application/json",
     },
     body: JSON.stringify({ flashcardId }),
+  });
+}
+
+export async function deleteHistory(historyId: string) {
+  return requestJson<DeleteHistorySuccess>("/api/history", {
+    method: "DELETE",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ historyId }),
   });
 }

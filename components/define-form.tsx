@@ -13,11 +13,13 @@ import { Button } from "@/components/ui/button";
 import {
   addFlashcard as addFlashcardRequest,
   ApiClientError,
+  deleteHistory as deleteHistoryRequest,
   definePhrase,
   fetchFlashcards,
   fetchHistory,
   queryKeys,
   removeFlashcard as removeFlashcardRequest,
+  type DeleteHistorySuccess,
   type DefineApiSuccess,
   type FlashcardItem,
   type HistoryApiSuccess,
@@ -414,6 +416,97 @@ export function DefineForm() {
     },
   });
 
+  const deleteHistoryMutation = useMutation<
+    DeleteHistorySuccess,
+    Error,
+    { historyId: string; flashcardId?: string },
+    {
+      previousHistory?: InfiniteData<HistoryApiSuccess, string | null>;
+      previousFlashcards?: FlashcardItem[];
+    }
+  >({
+    mutationFn: ({ historyId }) => deleteHistoryRequest(historyId),
+    onMutate: async ({ historyId, flashcardId }) => {
+      setHistoryActionError(null);
+      setFlashcardsActionError(null);
+
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.history(HISTORY_PAGE_SIZE) }),
+        queryClient.cancelQueries({ queryKey: queryKeys.flashcards() }),
+      ]);
+
+      const previousHistory = queryClient.getQueryData<
+        InfiniteData<HistoryApiSuccess, string | null>
+      >(queryKeys.history(HISTORY_PAGE_SIZE));
+      const previousFlashcards = queryClient.getQueryData<FlashcardItem[]>(
+        queryKeys.flashcards(),
+      );
+
+      queryClient.setQueryData<InfiniteData<HistoryApiSuccess, string | null>>(
+        queryKeys.history(HISTORY_PAGE_SIZE),
+        (current) => {
+          if (!current) {
+            return current;
+          }
+
+          return {
+            ...current,
+            pages: current.pages.map((page) => ({
+              ...page,
+              items: page.items.filter((item) => item.id !== historyId),
+            })),
+          };
+        },
+      );
+
+      queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
+        (current ?? []).filter(
+          (item) =>
+            item.lookupHistoryId !== historyId && (!flashcardId || item.id !== flashcardId),
+        ),
+      );
+
+      return {
+        previousHistory,
+        previousFlashcards,
+      };
+    },
+    onError: (mutationError, _variables, context) => {
+      if (context?.previousHistory) {
+        queryClient.setQueryData(queryKeys.history(HISTORY_PAGE_SIZE), context.previousHistory);
+      }
+      if (context?.previousFlashcards) {
+        queryClient.setQueryData(queryKeys.flashcards(), context.previousFlashcards);
+      }
+
+      setHistoryActionError(
+        getErrorMessage(mutationError, "Unable to delete history entry."),
+      );
+    },
+    onSuccess: (payload, variables) => {
+      const removedFlashcardIds = new Set(payload.removedFlashcardIds ?? []);
+      if (variables.flashcardId) {
+        removedFlashcardIds.add(variables.flashcardId);
+      }
+
+      if (removedFlashcardIds.size > 0) {
+        queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
+          (current ?? []).filter((item) => !removedFlashcardIds.has(item.id)),
+        );
+      }
+
+      setExpandedFlashcardId((current) =>
+        current && removedFlashcardIds.has(current) ? null : current,
+      );
+    },
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.history(HISTORY_PAGE_SIZE) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.flashcards() }),
+      ]);
+    },
+  });
+
   const historyItems = historyQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const flashcards = flashcardsQuery.data ?? [];
   const isLoading = defineMutation.isPending;
@@ -596,7 +689,7 @@ export function DefineForm() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="home-result-label !mb-1">Recent Lookups</p>
-              <p className="text-sm text-slate-600">Sentence + add button only.</p>
+              <p className="text-sm text-slate-600">Sentence + actions.</p>
             </div>
             {historyQuery.isFetching ? (
               <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
@@ -623,6 +716,9 @@ export function DefineForm() {
                 removeFlashcardMutation.isPending &&
                 item.flashcard !== null &&
                 removeFlashcardMutation.variables?.flashcardId === item.flashcard.id;
+              const isDeleting =
+                deleteHistoryMutation.isPending &&
+                deleteHistoryMutation.variables?.historyId === item.id;
 
               return (
                 <article
@@ -633,26 +729,43 @@ export function DefineForm() {
                     <p className="text-sm leading-[1.6] text-slate-700">
                       {renderHighlightedSentence(item.phraseInput, item.targetText)}
                     </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={item.flashcard ? "secondary" : "outline"}
-                      className="rounded-xl"
-                      disabled={isAdding || isRemoving}
-                      onClick={() => {
-                        if (item.flashcard) {
-                          removeFlashcardMutation.mutate({
-                            flashcardId: item.flashcard.id,
-                            historyId: item.id,
-                          });
-                          return;
-                        }
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={item.flashcard ? "secondary" : "outline"}
+                        className="rounded-xl"
+                        disabled={isAdding || isRemoving || isDeleting}
+                        onClick={() => {
+                          if (item.flashcard) {
+                            removeFlashcardMutation.mutate({
+                              flashcardId: item.flashcard.id,
+                              historyId: item.id,
+                            });
+                            return;
+                          }
 
-                        addFlashcardMutation.mutate(item);
-                      }}
-                    >
-                      {item.flashcard ? "Added" : "Add Flashcard"}
-                    </Button>
+                          addFlashcardMutation.mutate(item);
+                        }}
+                      >
+                        {item.flashcard ? "Added" : "Add Flashcard"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="rounded-xl"
+                        disabled={isAdding || isRemoving || isDeleting}
+                        onClick={() => {
+                          deleteHistoryMutation.mutate({
+                            historyId: item.id,
+                            flashcardId: item.flashcard?.id,
+                          });
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </div>
                 </article>
               );
