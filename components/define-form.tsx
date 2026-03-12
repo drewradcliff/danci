@@ -425,7 +425,7 @@ export function DefineForm() {
     { historyId: string; flashcardId?: string },
     {
       previousHistory?: InfiniteData<HistoryApiSuccess, string | null>;
-      previousFlashcards?: FlashcardItem[];
+      previousFlashcards?: FlashcardsApiSuccess;
     }
   >({
     mutationFn: ({ historyId }) => deleteHistoryRequest(historyId),
@@ -441,7 +441,7 @@ export function DefineForm() {
       const previousHistory = queryClient.getQueryData<
         InfiniteData<HistoryApiSuccess, string | null>
       >(queryKeys.history(HISTORY_PAGE_SIZE));
-      const previousFlashcards = queryClient.getQueryData<FlashcardItem[]>(
+      const previousFlashcards = queryClient.getQueryData<FlashcardsApiSuccess>(
         queryKeys.flashcards(),
       );
 
@@ -462,12 +462,12 @@ export function DefineForm() {
         },
       );
 
-      queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
-        (current ?? []).filter(
+      queryClient.setQueryData<FlashcardsApiSuccess>(queryKeys.flashcards(), (current) => ({
+        items: (current?.items ?? []).filter(
           (item) =>
             item.lookupHistoryId !== historyId && (!flashcardId || item.id !== flashcardId),
         ),
-      );
+      }));
 
       return {
         previousHistory,
@@ -493,9 +493,9 @@ export function DefineForm() {
       }
 
       if (removedFlashcardIds.size > 0) {
-        queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
-          (current ?? []).filter((item) => !removedFlashcardIds.has(item.id)),
-        );
+        queryClient.setQueryData<FlashcardsApiSuccess>(queryKeys.flashcards(), (current) => ({
+          items: (current?.items ?? []).filter((item) => !removedFlashcardIds.has(item.id)),
+        }));
       }
 
       setExpandedFlashcardId((current) =>
