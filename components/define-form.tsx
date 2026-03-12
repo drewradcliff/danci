@@ -99,6 +99,11 @@ type RemoveFlashcardSuccess = {
   flashcardId: string;
 };
 
+type DeleteHistorySuccess = {
+  removed: boolean;
+  historyId: string;
+};
+
 function getPreviewParts(phrase: string): PreviewParts | null {
   const firstMarkerIndex = phrase.indexOf("*");
 
@@ -318,19 +323,12 @@ export function DefineForm() {
             term,
             lookupHistoryId: item.id,
             createdAt: new Date().toISOString(),
-            content: {
-              phraseInput: item.phraseInput,
-              targetText: item.targetText,
-              word: item.targetText,
-              structured: null,
-              fallbackText: item.resultPreview,
-              definition: null,
-              resultPreview: item.resultPreview,
-            },
+            content: null,
           },
           ...current,
         ];
       });
+      void loadFlashcards();
     } catch {
       setHistoryError("Network error while adding flashcard.");
     } finally {
@@ -404,15 +402,53 @@ export function DefineForm() {
     await addFlashcard(item);
   }
 
+  async function deleteHistoryItemById(historyId: string) {
+    if (historyActionId || removingFlashcardId) {
+      return;
+    }
+
+    setHistoryActionId(historyId);
+    setHistoryError(null);
+
+    try {
+      const response = await fetch("/api/history", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ historyId }),
+      });
+
+      const payload = (await response.json()) as DeleteHistorySuccess | DefineApiError;
+      if (!response.ok) {
+        const fallbackMessage = "Unable to delete history entry.";
+        setHistoryError(
+          "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage,
+        );
+        return;
+      }
+
+      setHistoryItems((current) => current.filter((item) => item.id !== historyId));
+    } catch {
+      setHistoryError("Network error while deleting history entry.");
+    } finally {
+      setHistoryActionId(null);
+    }
+  }
+
   useEffect(() => {
     void loadHistory();
   }, []);
 
   useEffect(() => {
-    if (activeView === "flashcards" && flashcards.length === 0 && !isFlashcardsLoading) {
+    if (
+      activeView === "flashcards" &&
+      !isFlashcardsLoading &&
+      (flashcards.length === 0 || flashcards.some((card) => card.content === null))
+    ) {
       void loadFlashcards();
     }
-  }, [activeView, flashcards.length, isFlashcardsLoading]);
+  }, [activeView, flashcards, isFlashcardsLoading]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -592,7 +628,7 @@ export function DefineForm() {
             <div>
               <p className="home-result-label !mb-1">Recent Lookups</p>
               <p className="text-sm text-slate-600">
-                Sentence + add button only.
+                Sentence + actions.
               </p>
             </div>
             {isHistoryLoading ? (
@@ -622,21 +658,38 @@ export function DefineForm() {
                   <p className="text-sm leading-[1.6] text-slate-700">
                     {renderHighlightedSentence(item.phraseInput, item.targetText)}
                   </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={item.flashcard ? "secondary" : "outline"}
-                    className="rounded-xl"
-                    disabled={
-                      historyActionId === item.id ||
-                      (item.flashcard ? removingFlashcardId === item.flashcard.id : false)
-                    }
-                    onClick={() => {
-                      void toggleHistoryFlashcard(item);
-                    }}
-                  >
-                    {item.flashcard ? "Added" : "Add Flashcard"}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={item.flashcard ? "secondary" : "outline"}
+                      className="rounded-xl"
+                      disabled={
+                        historyActionId === item.id ||
+                        (item.flashcard ? removingFlashcardId === item.flashcard.id : false)
+                      }
+                      onClick={() => {
+                        void toggleHistoryFlashcard(item);
+                      }}
+                    >
+                      {item.flashcard ? "Added" : "Add Flashcard"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="rounded-xl"
+                      disabled={
+                        historyActionId === item.id ||
+                        (item.flashcard ? removingFlashcardId === item.flashcard.id : false)
+                      }
+                      onClick={() => {
+                        void deleteHistoryItemById(item.id);
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </div>
               </article>
             ))}
@@ -763,6 +816,18 @@ export function DefineForm() {
                                 "No saved content available."}
                             </div>
                           </div>
+                          {card.content.definition?.examples?.length ? (
+                            <div className="home-result-block mt-[14px] first:mt-0">
+                              <div className="home-result-label">More Use Cases Alike</div>
+                              <ul className="home-result-list">
+                                {card.content.definition.examples.map((example, index) => (
+                                  <li key={`${example}-${index}`} className="mb-[6px]">
+                                    {example}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
                         </div>
                       )}
 
