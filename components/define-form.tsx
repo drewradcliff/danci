@@ -19,6 +19,7 @@ import {
   queryKeys,
   removeFlashcard as removeFlashcardRequest,
   type DefineApiSuccess,
+  type FlashcardsApiSuccess,
   type FlashcardItem,
   type HistoryApiSuccess,
   type HistoryItem,
@@ -202,7 +203,7 @@ export function DefineForm() {
     HistoryItem,
     {
       previousHistory?: InfiniteData<HistoryApiSuccess, string | null>;
-      previousFlashcards?: FlashcardItem[];
+      previousFlashcards?: FlashcardsApiSuccess;
       optimisticFlashcardId: string;
     }
   >({
@@ -219,7 +220,7 @@ export function DefineForm() {
       const previousHistory = queryClient.getQueryData<
         InfiniteData<HistoryApiSuccess, string | null>
       >(queryKeys.history(HISTORY_PAGE_SIZE));
-      const previousFlashcards = queryClient.getQueryData<FlashcardItem[]>(
+      const previousFlashcards = queryClient.getQueryData<FlashcardsApiSuccess>(
         queryKeys.flashcards(),
       );
 
@@ -241,11 +242,12 @@ export function DefineForm() {
           ),
       );
 
-      queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
-        replaceOrPrependFlashcard(
-          current,
+      queryClient.setQueryData<FlashcardsApiSuccess>(queryKeys.flashcards(), (current) => ({
+        items: replaceOrPrependFlashcard(
+          current?.items,
           createOptimisticFlashcard(item, optimisticFlashcardId),
         ),
+      }),
       );
 
       return {
@@ -284,17 +286,18 @@ export function DefineForm() {
           ),
       );
 
-      queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
-        replaceOrPrependFlashcard(
-          current,
+      queryClient.setQueryData<FlashcardsApiSuccess>(queryKeys.flashcards(), (current) => ({
+        items: replaceOrPrependFlashcard(
+          current?.items,
           {
-            ...(current?.find((card) => card.id === context?.optimisticFlashcardId) ??
+            ...(current?.items.find((card) => card.id === context?.optimisticFlashcardId) ??
               createOptimisticFlashcard(item, flashcardId)),
             id: flashcardId,
             term,
           },
           { removeId: context?.optimisticFlashcardId },
         ),
+      }),
       );
     },
     onSettled: async () => {
@@ -315,7 +318,7 @@ export function DefineForm() {
     },
     {
       previousHistory?: InfiniteData<HistoryApiSuccess, string | null>;
-      previousFlashcards?: FlashcardItem[];
+      previousFlashcards?: FlashcardsApiSuccess;
     }
   >({
     mutationFn: ({ flashcardId }) => removeFlashcardRequest(flashcardId),
@@ -331,7 +334,7 @@ export function DefineForm() {
       const previousHistory = queryClient.getQueryData<
         InfiniteData<HistoryApiSuccess, string | null>
       >(queryKeys.history(HISTORY_PAGE_SIZE));
-      const previousFlashcards = queryClient.getQueryData<FlashcardItem[]>(
+      const previousFlashcards = queryClient.getQueryData<FlashcardsApiSuccess>(
         queryKeys.flashcards(),
       );
 
@@ -348,9 +351,9 @@ export function DefineForm() {
           ),
       );
 
-      queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
-        (current ?? []).filter((item) => item.id !== flashcardId),
-      );
+      queryClient.setQueryData<FlashcardsApiSuccess>(queryKeys.flashcards(), (current) => ({
+        items: (current?.items ?? []).filter((item) => item.id !== flashcardId),
+      }));
 
       return {
         previousHistory,
@@ -461,9 +464,9 @@ export function DefineForm() {
     );
   }
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await defineMutation.mutateAsync(phrase);
+    defineMutation.mutate(phrase);
   }
 
   return (
