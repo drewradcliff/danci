@@ -7,6 +7,7 @@ import {
   Manrope,
 } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import { QueryProvider } from "@/components/providers/query-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -51,7 +52,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${headlineFont.variable} ${bodyFont.variable} ${scriptFont.variable} antialiased`}
       >
-        {children}
+        <QueryProvider>{children}</QueryProvider>
         <Analytics />
       </body>
     </html>

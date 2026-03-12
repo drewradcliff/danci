@@ -1,65 +1,30 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
+import { FormEvent, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-
-type HistoryItem = {
-  id: string;
-  phraseInput: string;
-  targetText: string;
-  contextText: string;
-  resultPreview: string | null;
-  createdAt: string;
-  flashcard: {
-    id: string;
-    term: string;
-  } | null;
-};
-
-type DefineApiSuccess = {
-  phrase: string;
-  context: string;
-  structured: {
-    word: string;
-    meaning: string;
-    examples: string[];
-  } | null;
-  fallbackText: string | null;
-  // Compatibility shape from API fallback.
-  word?: string;
-  definition?: {
-    meaning: string;
-    examples: string[];
-  };
-  meta: {
-    definitionsFound: number;
-    dictionaryLookupFailed?: boolean;
-    dictionaryErrorCode?: string | null;
-    usedFallback: boolean;
-    jsonParseFailed: boolean;
-  };
-  historyItem?: HistoryItem;
-};
-
-type DefineApiError = {
-  error: {
-    code: string;
-    message: string;
-  };
-};
-
-type HistoryApiSuccess = {
-  items: HistoryItem[];
-  nextCursor: string | null;
-};
-
-type ToggleFlashcardSuccess = {
-  active: boolean;
-  alreadyExisted?: boolean;
-  flashcardId?: string;
-  term?: string;
-};
+import {
+  addFlashcard as addFlashcardRequest,
+  ApiClientError,
+  definePhrase,
+  fetchFlashcards,
+  fetchHistory,
+  queryKeys,
+  removeFlashcard as removeFlashcardRequest,
+  type DefineApiSuccess,
+  type FlashcardItem,
+  type HistoryApiSuccess,
+  type HistoryItem,
+  type RemoveFlashcardSuccess,
+  type ToggleFlashcardSuccess,
+} from "@/lib/client-api";
 
 type PreviewParts = {
   before: string;
@@ -67,37 +32,7 @@ type PreviewParts = {
   after: string;
 };
 
-type FlashcardItem = {
-  id: string;
-  term: string;
-  lookupHistoryId: string | null;
-  createdAt: string;
-  content: {
-    phraseInput: string;
-    targetText: string;
-    word: string | null;
-    structured: {
-      word: string;
-      meaning: string;
-      examples: string[];
-    } | null;
-    fallbackText: string | null;
-    definition: {
-      meaning: string;
-      examples: string[];
-    } | null;
-    resultPreview: string | null;
-  } | null;
-};
-
-type FlashcardsApiSuccess = {
-  items: FlashcardItem[];
-};
-
-type RemoveFlashcardSuccess = {
-  removed: boolean;
-  flashcardId: string;
-};
+const HISTORY_PAGE_SIZE = 20;
 
 function getPreviewParts(phrase: string): PreviewParts | null {
   const firstMarkerIndex = phrase.indexOf("*");
@@ -125,88 +60,376 @@ function getPreviewParts(phrase: string): PreviewParts | null {
   };
 }
 
+function adjustTextareaHeight(textarea: HTMLTextAreaElement) {
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
+function mergeHistory(previous: HistoryItem[], incoming: HistoryItem[]): HistoryItem[] {
+  const merged = [...incoming, ...previous];
+  const seen = new Set<string>();
+  return merged.filter((item) => {
+    if (seen.has(item.id)) {
+      return false;
+    }
+
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function getErrorMessage(error: unknown, fallbackMessage: string) {
+  if (error instanceof ApiClientError) {
+    return error.message || fallbackMessage;
+  }
+
+  if (error instanceof Error) {
+    return error.message || fallbackMessage;
+  }
+
+  return fallbackMessage;
+}
+
+function mapHistoryPages(
+  data: InfiniteData<HistoryApiSuccess, string | null> | undefined,
+  mapItem: (item: HistoryItem) => HistoryItem,
+) {
+  if (!data) {
+    return data;
+  }
+
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({
+      ...page,
+      items: page.items.map(mapItem),
+    })),
+  };
+}
+
+function prependHistoryItem(
+  data: InfiniteData<HistoryApiSuccess, string | null> | undefined,
+  item: HistoryItem,
+): InfiniteData<HistoryApiSuccess, string | null> {
+  if (!data || data.pages.length === 0) {
+    return {
+      pageParams: [null],
+      pages: [
+        {
+          items: [item],
+          nextCursor: null,
+        },
+      ],
+    };
+  }
+
+  const [firstPage, ...restPages] = data.pages;
+
+  return {
+    ...data,
+    pages: [
+      {
+        ...firstPage,
+        items: mergeHistory(firstPage.items, [item]),
+      },
+      ...restPages,
+    ],
+  };
+}
+
+function replaceOrPrependFlashcard(
+  cards: FlashcardItem[] | undefined,
+  card: FlashcardItem,
+  options?: { removeId?: string },
+) {
+  const filtered = (cards ?? []).filter(
+    (current) => current.id !== card.id && current.id !== options?.removeId,
+  );
+
+  return [card, ...filtered];
+}
+
+function createOptimisticFlashcard(item: HistoryItem, flashcardId: string): FlashcardItem {
+  return {
+    id: flashcardId,
+    term: item.targetText,
+    lookupHistoryId: item.id,
+    createdAt: new Date().toISOString(),
+    content: {
+      phraseInput: item.phraseInput,
+      targetText: item.targetText,
+      word: item.targetText,
+      structured: null,
+      fallbackText: item.resultPreview,
+      definition: null,
+      resultPreview: item.resultPreview,
+    },
+  };
+}
+
 export function DefineForm() {
+  const queryClient = useQueryClient();
+
   const [activeView, setActiveView] = useState<"define" | "history" | "flashcards">(
     "define",
   );
   const [phrase, setPhrase] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DefineApiSuccess | null>(null);
-  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
-  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-  const [isHistoryLoadingMore, setIsHistoryLoadingMore] = useState(false);
-  const [historyActionId, setHistoryActionId] = useState<string | null>(null);
-  const [flashcards, setFlashcards] = useState<FlashcardItem[]>([]);
-  const [flashcardsError, setFlashcardsError] = useState<string | null>(null);
-  const [isFlashcardsLoading, setIsFlashcardsLoading] = useState(false);
-  const [removingFlashcardId, setRemovingFlashcardId] = useState<string | null>(null);
+  const [historyActionError, setHistoryActionError] = useState<string | null>(null);
+  const [flashcardsActionError, setFlashcardsActionError] = useState<string | null>(null);
   const [expandedFlashcardId, setExpandedFlashcardId] = useState<string | null>(null);
+
   const preview = getPreviewParts(phrase);
 
-  function adjustTextareaHeight(textarea: HTMLTextAreaElement) {
-    textarea.style.height = "auto";
-    textarea.style.height = `${textarea.scrollHeight}px`;
-  }
+  const historyQuery = useInfiniteQuery({
+    queryKey: queryKeys.history(HISTORY_PAGE_SIZE),
+    queryFn: ({ pageParam }) =>
+      fetchHistory({ cursor: pageParam, limit: HISTORY_PAGE_SIZE }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+  });
 
-  function mergeHistory(previous: HistoryItem[], incoming: HistoryItem[]): HistoryItem[] {
-    const merged = [...incoming, ...previous];
-    const seen = new Set<string>();
-    return merged.filter((item) => {
-      if (seen.has(item.id)) {
-        return false;
-      }
+  const flashcardsQuery = useQuery({
+    queryKey: queryKeys.flashcards(),
+    queryFn: fetchFlashcards,
+    select: (data) => data.items,
+  });
 
-      seen.add(item.id);
-      return true;
-    });
-  }
-
-  async function loadHistory(options?: { cursor?: string | null; append?: boolean }) {
-    const cursor = options?.cursor ?? null;
-    const append = options?.append ?? false;
-
-    if (append) {
-      setIsHistoryLoadingMore(true);
-    } else {
-      setIsHistoryLoading(true);
-      setHistoryError(null);
+  const addFlashcardMutation = useMutation<
+    ToggleFlashcardSuccess,
+    Error,
+    HistoryItem,
+    {
+      previousHistory?: InfiniteData<HistoryApiSuccess, string | null>;
+      previousFlashcards?: FlashcardItem[];
+      optimisticFlashcardId: string;
     }
+  >({
+    mutationFn: (item) => addFlashcardRequest(item.id),
+    onMutate: async (item) => {
+      setHistoryActionError(null);
+      setFlashcardsActionError(null);
 
-    try {
-      const query = new URLSearchParams();
-      if (cursor) {
-        query.set("cursor", cursor);
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.history(HISTORY_PAGE_SIZE) }),
+        queryClient.cancelQueries({ queryKey: queryKeys.flashcards() }),
+      ]);
+
+      const previousHistory = queryClient.getQueryData<
+        InfiniteData<HistoryApiSuccess, string | null>
+      >(queryKeys.history(HISTORY_PAGE_SIZE));
+      const previousFlashcards = queryClient.getQueryData<FlashcardItem[]>(
+        queryKeys.flashcards(),
+      );
+
+      const optimisticFlashcardId = `optimistic-${item.id}`;
+
+      queryClient.setQueryData<InfiniteData<HistoryApiSuccess, string | null>>(
+        queryKeys.history(HISTORY_PAGE_SIZE),
+        (current) =>
+          mapHistoryPages(current, (historyItem) =>
+            historyItem.id === item.id
+              ? {
+                  ...historyItem,
+                  flashcard: {
+                    id: optimisticFlashcardId,
+                    term: item.targetText,
+                  },
+                }
+              : historyItem,
+          ),
+      );
+
+      queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
+        replaceOrPrependFlashcard(
+          current,
+          createOptimisticFlashcard(item, optimisticFlashcardId),
+        ),
+      );
+
+      return {
+        previousHistory,
+        previousFlashcards,
+        optimisticFlashcardId,
+      };
+    },
+    onError: (mutationError, _item, context) => {
+      if (context?.previousHistory) {
+        queryClient.setQueryData(queryKeys.history(HISTORY_PAGE_SIZE), context.previousHistory);
       }
-      query.set("limit", "20");
-      const response = await fetch(`/api/history?${query.toString()}`);
-      const payload = (await response.json()) as HistoryApiSuccess | DefineApiError;
+      if (context?.previousFlashcards) {
+        queryClient.setQueryData(queryKeys.flashcards(), context.previousFlashcards);
+      }
 
-      if (!response.ok) {
-        const fallbackMessage = "Unable to load history.";
-        setHistoryError(
-          "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage,
+      setHistoryActionError(getErrorMessage(mutationError, "Unable to add flashcard."));
+    },
+    onSuccess: (payload, item, context) => {
+      const flashcardId = payload.flashcardId ?? context?.optimisticFlashcardId ?? item.id;
+      const term = payload.term ?? item.targetText;
+
+      queryClient.setQueryData<InfiniteData<HistoryApiSuccess, string | null>>(
+        queryKeys.history(HISTORY_PAGE_SIZE),
+        (current) =>
+          mapHistoryPages(current, (historyItem) =>
+            historyItem.id === item.id
+              ? {
+                  ...historyItem,
+                  flashcard: {
+                    id: flashcardId,
+                    term,
+                  },
+                }
+              : historyItem,
+          ),
+      );
+
+      queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
+        replaceOrPrependFlashcard(
+          current,
+          {
+            ...(current?.find((card) => card.id === context?.optimisticFlashcardId) ??
+              createOptimisticFlashcard(item, flashcardId)),
+            id: flashcardId,
+            term,
+          },
+          { removeId: context?.optimisticFlashcardId },
+        ),
+      );
+    },
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.history(HISTORY_PAGE_SIZE) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.flashcards() }),
+      ]);
+    },
+  });
+
+  const removeFlashcardMutation = useMutation<
+    RemoveFlashcardSuccess,
+    Error,
+    {
+      flashcardId: string;
+      historyId?: string;
+      fromFlashcardsView?: boolean;
+    },
+    {
+      previousHistory?: InfiniteData<HistoryApiSuccess, string | null>;
+      previousFlashcards?: FlashcardItem[];
+    }
+  >({
+    mutationFn: ({ flashcardId }) => removeFlashcardRequest(flashcardId),
+    onMutate: async ({ flashcardId }) => {
+      setHistoryActionError(null);
+      setFlashcardsActionError(null);
+
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.history(HISTORY_PAGE_SIZE) }),
+        queryClient.cancelQueries({ queryKey: queryKeys.flashcards() }),
+      ]);
+
+      const previousHistory = queryClient.getQueryData<
+        InfiniteData<HistoryApiSuccess, string | null>
+      >(queryKeys.history(HISTORY_PAGE_SIZE));
+      const previousFlashcards = queryClient.getQueryData<FlashcardItem[]>(
+        queryKeys.flashcards(),
+      );
+
+      queryClient.setQueryData<InfiniteData<HistoryApiSuccess, string | null>>(
+        queryKeys.history(HISTORY_PAGE_SIZE),
+        (current) =>
+          mapHistoryPages(current, (historyItem) =>
+            historyItem.flashcard?.id === flashcardId
+              ? {
+                  ...historyItem,
+                  flashcard: null,
+                }
+              : historyItem,
+          ),
+      );
+
+      queryClient.setQueryData<FlashcardItem[]>(queryKeys.flashcards(), (current) =>
+        (current ?? []).filter((item) => item.id !== flashcardId),
+      );
+
+      return {
+        previousHistory,
+        previousFlashcards,
+      };
+    },
+    onError: (mutationError, variables, context) => {
+      if (context?.previousHistory) {
+        queryClient.setQueryData(queryKeys.history(HISTORY_PAGE_SIZE), context.previousHistory);
+      }
+      if (context?.previousFlashcards) {
+        queryClient.setQueryData(queryKeys.flashcards(), context.previousFlashcards);
+      }
+
+      const message = getErrorMessage(mutationError, "Unable to remove flashcard.");
+      if (variables.fromFlashcardsView) {
+        setFlashcardsActionError(message);
+      } else {
+        setHistoryActionError(message);
+      }
+    },
+    onSuccess: (_, variables) => {
+      setExpandedFlashcardId((current) =>
+        current === variables.flashcardId ? null : current,
+      );
+    },
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.history(HISTORY_PAGE_SIZE) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.flashcards() }),
+      ]);
+    },
+  });
+
+  const defineMutation = useMutation({
+    mutationFn: definePhrase,
+    onMutate: () => {
+      setError(null);
+      setResult(null);
+    },
+    onSuccess: async (payload) => {
+      setResult(payload);
+      setActiveView("define");
+
+      if (payload.historyItem) {
+        queryClient.setQueryData<InfiniteData<HistoryApiSuccess, string | null>>(
+          queryKeys.history(HISTORY_PAGE_SIZE),
+          (current) => prependHistoryItem(current, payload.historyItem!),
         );
         return;
       }
 
-      const historyPayload = payload as HistoryApiSuccess;
-      setHistoryCursor(historyPayload.nextCursor);
-      setHistoryItems((previous) =>
-        append ? [...previous, ...historyPayload.items] : historyPayload.items,
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.history(HISTORY_PAGE_SIZE),
+      });
+    },
+    onError: (mutationError) => {
+      setError(
+        getErrorMessage(mutationError, "Something went wrong while defining the word."),
       );
-    } catch {
-      setHistoryError("Network error while loading history.");
-    } finally {
-      if (append) {
-        setIsHistoryLoadingMore(false);
-      } else {
-        setIsHistoryLoading(false);
-      }
-    }
-  }
+    },
+  });
+
+  const historyItems = historyQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const flashcards = flashcardsQuery.data ?? [];
+  const isLoading = defineMutation.isPending;
+  const isHistoryLoading = historyQuery.isPending && !historyQuery.data;
+  const isHistoryLoadingMore = historyQuery.isFetchingNextPage;
+  const isFlashcardsLoading = flashcardsQuery.isPending && !flashcardsQuery.data;
+  const historyError =
+    historyActionError ??
+    (historyQuery.error
+      ? getErrorMessage(historyQuery.error, "Unable to load history.")
+      : null);
+  const flashcardsError =
+    flashcardsActionError ??
+    (flashcardsQuery.error
+      ? getErrorMessage(flashcardsQuery.error, "Unable to load flashcards.")
+      : null);
 
   function renderHighlightedSentence(phraseText: string, targetText: string) {
     const marked = getPreviewParts(phraseText);
@@ -238,225 +461,9 @@ export function DefineForm() {
     );
   }
 
-  async function loadFlashcards() {
-    setIsFlashcardsLoading(true);
-    setFlashcardsError(null);
-
-    try {
-      const response = await fetch("/api/flashcards");
-      const payload = (await response.json()) as FlashcardsApiSuccess | DefineApiError;
-
-      if (!response.ok) {
-        const fallbackMessage = "Unable to load flashcards.";
-        setFlashcardsError(
-          "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage,
-        );
-        return;
-      }
-
-      setFlashcards((payload as FlashcardsApiSuccess).items);
-    } catch {
-      setFlashcardsError("Network error while loading flashcards.");
-    } finally {
-      setIsFlashcardsLoading(false);
-    }
-  }
-
-  async function addFlashcard(item: HistoryItem) {
-    if (historyActionId || item.flashcard) {
-      return;
-    }
-
-    setHistoryActionId(item.id);
-    setHistoryError(null);
-    setFlashcardsError(null);
-
-    try {
-      const response = await fetch("/api/flashcards", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ lookupHistoryId: item.id }),
-      });
-
-      const payload = (await response.json()) as ToggleFlashcardSuccess | DefineApiError;
-      if (!response.ok) {
-        const fallbackMessage = "Unable to add flashcard.";
-        setHistoryError(
-          "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage,
-        );
-        return;
-      }
-
-      const addPayload = payload as ToggleFlashcardSuccess;
-      const flashcardId = addPayload.flashcardId ?? `flashcard-${item.id}`;
-      const term = addPayload.term ?? item.targetText;
-
-      setHistoryItems((current) =>
-        current.map((historyItem) =>
-          historyItem.id === item.id
-            ? {
-                ...historyItem,
-                flashcard: {
-                  id: flashcardId,
-                  term,
-                },
-              }
-            : historyItem,
-        ),
-      );
-
-      setFlashcards((current) => {
-        if (current.some((card) => card.id === flashcardId)) {
-          return current;
-        }
-
-        return [
-          {
-            id: flashcardId,
-            term,
-            lookupHistoryId: item.id,
-            createdAt: new Date().toISOString(),
-            content: {
-              phraseInput: item.phraseInput,
-              targetText: item.targetText,
-              word: item.targetText,
-              structured: null,
-              fallbackText: item.resultPreview,
-              definition: null,
-              resultPreview: item.resultPreview,
-            },
-          },
-          ...current,
-        ];
-      });
-    } catch {
-      setHistoryError("Network error while adding flashcard.");
-    } finally {
-      setHistoryActionId(null);
-    }
-  }
-
-  async function removeFlashcardById(
-    flashcardId: string,
-    options?: { historyId?: string; fromFlashcardsView?: boolean },
-  ) {
-    if (removingFlashcardId || historyActionId) {
-      return;
-    }
-
-    if (options?.historyId) {
-      setHistoryActionId(options.historyId);
-    }
-    setRemovingFlashcardId(flashcardId);
-    setFlashcardsError(null);
-    setHistoryError(null);
-
-    try {
-      const response = await fetch("/api/flashcards", {
-        method: "DELETE",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ flashcardId }),
-      });
-
-      const payload = (await response.json()) as RemoveFlashcardSuccess | DefineApiError;
-      if (!response.ok) {
-        const fallbackMessage = "Unable to remove flashcard.";
-        setFlashcardsError(
-          "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage,
-        );
-        return;
-      }
-
-      setFlashcards((current) => current.filter((item) => item.id !== flashcardId));
-      setHistoryItems((current) =>
-        current.map((item) =>
-          item.flashcard?.id === flashcardId
-            ? {
-                ...item,
-                flashcard: null,
-              }
-            : item,
-        ),
-      );
-      setExpandedFlashcardId((current) => (current === flashcardId ? null : current));
-    } catch {
-      if (options?.fromFlashcardsView) {
-        setFlashcardsError("Network error while removing flashcard.");
-      } else {
-        setHistoryError("Network error while removing flashcard.");
-      }
-    } finally {
-      setRemovingFlashcardId(null);
-      setHistoryActionId(null);
-    }
-  }
-
-  async function toggleHistoryFlashcard(item: HistoryItem) {
-    if (item.flashcard) {
-      await removeFlashcardById(item.flashcard.id, { historyId: item.id });
-      return;
-    }
-
-    await addFlashcard(item);
-  }
-
-  useEffect(() => {
-    void loadHistory();
-  }, []);
-
-  useEffect(() => {
-    if (activeView === "flashcards" && flashcards.length === 0 && !isFlashcardsLoading) {
-      void loadFlashcards();
-    }
-  }, [activeView, flashcards.length, isFlashcardsLoading]);
-
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    setIsLoading(true);
-    setError(null);
-    setResult(null);
-
-    try {
-      const response = await fetch("/api/define", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ phrase }),
-      });
-
-      const payload = (await response.json()) as
-        | DefineApiSuccess
-        | DefineApiError;
-
-      if (!response.ok) {
-        const fallbackMessage = "Something went wrong while defining the word.";
-        setError(
-          "error" in payload ? payload.error.message ?? fallbackMessage : fallbackMessage
-        );
-        return;
-      }
-
-      const successPayload = payload as DefineApiSuccess;
-      setResult(successPayload);
-      setActiveView("define");
-
-      const historyItem = successPayload.historyItem;
-      if (historyItem) {
-        setHistoryItems((previous) => mergeHistory(previous, [historyItem]));
-      } else {
-        void loadHistory();
-      }
-    } catch {
-      setError("Network error while calling /api/define.");
-    } finally {
-      setIsLoading(false);
-    }
+    await defineMutation.mutateAsync(phrase);
   }
 
   return (
@@ -531,9 +538,7 @@ export function DefineForm() {
                 <p className="home-preview-label">Preview</p>
                 <div className="home-preview-text">
                   {preview.before}
-                  <span className="home-preview-mark">
-                    {preview.marked}
-                  </span>
+                  <span className="home-preview-mark">{preview.marked}</span>
                   {preview.after}
                 </div>
               </div>
@@ -591,11 +596,9 @@ export function DefineForm() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="home-result-label !mb-1">Recent Lookups</p>
-              <p className="text-sm text-slate-600">
-                Sentence + add button only.
-              </p>
+              <p className="text-sm text-slate-600">Sentence + add button only.</p>
             </div>
-            {isHistoryLoading ? (
+            {historyQuery.isFetching ? (
               <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
                 Loading...
               </span>
@@ -613,43 +616,57 @@ export function DefineForm() {
           ) : null}
 
           <div className="mt-3 flex flex-col gap-3">
-            {historyItems.map((item) => (
-              <article
-                key={item.id}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm leading-[1.6] text-slate-700">
-                    {renderHighlightedSentence(item.phraseInput, item.targetText)}
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={item.flashcard ? "secondary" : "outline"}
-                    className="rounded-xl"
-                    disabled={
-                      historyActionId === item.id ||
-                      (item.flashcard ? removingFlashcardId === item.flashcard.id : false)
-                    }
-                    onClick={() => {
-                      void toggleHistoryFlashcard(item);
-                    }}
-                  >
-                    {item.flashcard ? "Added" : "Add Flashcard"}
-                  </Button>
-                </div>
-              </article>
-            ))}
+            {historyItems.map((item) => {
+              const isAdding =
+                addFlashcardMutation.isPending && addFlashcardMutation.variables?.id === item.id;
+              const isRemoving =
+                removeFlashcardMutation.isPending &&
+                item.flashcard !== null &&
+                removeFlashcardMutation.variables?.flashcardId === item.flashcard.id;
+
+              return (
+                <article
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm leading-[1.6] text-slate-700">
+                      {renderHighlightedSentence(item.phraseInput, item.targetText)}
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={item.flashcard ? "secondary" : "outline"}
+                      className="rounded-xl"
+                      disabled={isAdding || isRemoving}
+                      onClick={() => {
+                        if (item.flashcard) {
+                          removeFlashcardMutation.mutate({
+                            flashcardId: item.flashcard.id,
+                            historyId: item.id,
+                          });
+                          return;
+                        }
+
+                        addFlashcardMutation.mutate(item);
+                      }}
+                    >
+                      {item.flashcard ? "Added" : "Add Flashcard"}
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
 
-          {historyCursor ? (
+          {historyQuery.hasNextPage ? (
             <div className="mt-4">
               <Button
                 type="button"
                 variant="outline"
                 disabled={isHistoryLoadingMore}
                 onClick={() => {
-                  void loadHistory({ cursor: historyCursor, append: true });
+                  void historyQuery.fetchNextPage();
                 }}
               >
                 {isHistoryLoadingMore ? "Loading..." : "Load More"}
@@ -664,11 +681,9 @@ export function DefineForm() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="home-result-label !mb-1">Flashcards</p>
-              <p className="text-sm text-slate-600">
-                Tap a word to reveal its saved content.
-              </p>
+              <p className="text-sm text-slate-600">Tap a word to reveal its saved content.</p>
             </div>
-            {isFlashcardsLoading ? (
+            {flashcardsQuery.isFetching ? (
               <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
                 Loading...
               </span>
@@ -681,15 +696,21 @@ export function DefineForm() {
             </p>
           ) : null}
 
+          {isFlashcardsLoading ? (
+            <p className="mt-3 text-sm text-slate-600">Loading flashcards...</p>
+          ) : null}
+
           {!isFlashcardsLoading && flashcards.length === 0 ? (
-            <p className="mt-3 text-sm text-slate-600">
-              No flashcards yet. Add one from history.
-            </p>
+            <p className="mt-3 text-sm text-slate-600">No flashcards yet. Add one from history.</p>
           ) : null}
 
           <div className="mt-3 flex flex-col gap-3">
             {flashcards.map((card) => {
               const isExpanded = expandedFlashcardId === card.id;
+              const isRemoving =
+                removeFlashcardMutation.isPending &&
+                removeFlashcardMutation.variables?.flashcardId === card.id;
+
               return (
                 <article
                   key={card.id}
@@ -700,9 +721,7 @@ export function DefineForm() {
                       type="button"
                       className="w-full text-left"
                       onClick={() => {
-                        setExpandedFlashcardId((current) =>
-                          current === card.id ? null : card.id,
-                        );
+                        setExpandedFlashcardId((current) => (current === card.id ? null : card.id));
                       }}
                     >
                       <p className="text-lg font-semibold text-slate-800">{card.term}</p>
@@ -712,9 +731,13 @@ export function DefineForm() {
                       size="sm"
                       variant="outline"
                       className="rounded-xl"
-                      disabled={removingFlashcardId === card.id}
+                      disabled={isRemoving}
                       onClick={() => {
-                        void removeFlashcardById(card.id, { fromFlashcardsView: true });
+                        removeFlashcardMutation.mutate({
+                          flashcardId: card.id,
+                          historyId: card.lookupHistoryId ?? undefined,
+                          fromFlashcardsView: true,
+                        });
                       }}
                     >
                       Remove
