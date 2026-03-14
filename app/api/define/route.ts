@@ -14,6 +14,7 @@ import { parseMarkedWord } from "@/lib/parse-marked-word";
 
 type DefineRequestBody = {
   phrase?: unknown;
+  targetWord?: unknown;
 };
 
 type ErrorPayload = {
@@ -187,6 +188,15 @@ function getSessionUserId(session: unknown): string | null {
   return typeof userId === "string" && userId.trim() ? userId : null;
 }
 
+function normalizeTargetWord(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized || null;
+}
+
 export async function POST(request: Request) {
   const session = await getServerSession(request.headers);
   const userId = getSessionUserId(session);
@@ -212,12 +222,14 @@ export async function POST(request: Request) {
 
   const normalizedPhrase = body.phrase.trim();
   const parsed = parseMarkedWord(normalizedPhrase);
+  const explicitTargetWord = normalizeTargetWord(body.targetWord);
+  const targetWord = explicitTargetWord ?? parsed.word;
 
   let definitions: DictionaryDefinition[] = [];
   let dictionaryErrorCode: DictionaryError["code"] | "INTERNAL_ERROR" | null =
     null;
   try {
-    definitions = await getDictionaryDefinitions(parsed.word);
+    definitions = await getDictionaryDefinitions(targetWord);
   } catch (error) {
     if (error instanceof DictionaryError) {
       dictionaryErrorCode = error.code;
@@ -235,7 +247,7 @@ export async function POST(request: Request) {
     const aiResponse = await generateText({
       model: DEFINE_MODEL,
       system: DEFINE_SYSTEM_PROMPT,
-      prompt: buildStructuredPrompt(parsed.context, parsed.word, definitions),
+      prompt: buildStructuredPrompt(parsed.context, targetWord, definitions),
     });
 
     rawModelOutput = aiResponse.text.trim();
@@ -251,7 +263,7 @@ export async function POST(request: Request) {
     jsonParseFailed && rawModelOutput
       ? rawModelOutput
       : (selectedDefinition?.meaning ??
-        `No dictionary match found for "${parsed.word}", but it appears in this context: "${parsed.context}".`);
+        `No dictionary match found for "${targetWord}", but it appears in this context: "${parsed.context}".`);
 
   const responsePayload = {
     phrase: parsed.phrase,
@@ -259,7 +271,7 @@ export async function POST(request: Request) {
     structured,
     fallbackText,
     // Compatibility fallback for older rendering paths.
-    word: parsed.word,
+    word: targetWord,
     definition: selectedDefinition,
     meta: {
       definitionsFound: definitions.length,

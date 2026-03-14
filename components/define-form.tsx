@@ -7,7 +7,7 @@ import {
   useQueryClient,
   type InfiniteData,
 } from "@tanstack/react-query";
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -35,32 +35,82 @@ type PreviewParts = {
   after: string;
 };
 
+type WordSegment = {
+  text: string;
+  selectable: boolean;
+  normalizedWord?: string;
+};
+
 const HISTORY_PAGE_SIZE = 20;
 
 function getPreviewParts(phrase: string): PreviewParts | null {
-  const firstMarkerIndex = phrase.indexOf("*");
-
-  if (firstMarkerIndex === -1) {
+  const markedMatch = phrase.match(/\*([^*]+)\*/);
+  if (!markedMatch || typeof markedMatch.index !== "number") {
     return null;
   }
 
-  const secondMarkerIndex = phrase.indexOf("*", firstMarkerIndex + 1);
-
-  if (secondMarkerIndex === -1) {
-    return null;
-  }
-
-  const marked = phrase.slice(firstMarkerIndex + 1, secondMarkerIndex);
-
+  const marked = (markedMatch[1] ?? "").trim();
   if (!marked) {
     return null;
   }
 
+  const start = markedMatch.index;
+  const end = start + markedMatch[0].length;
+
   return {
-    before: phrase.slice(0, firstMarkerIndex).replace(/\*/g, ""),
+    before: phrase.slice(0, start).replace(/\*/g, ""),
     marked,
-    after: phrase.slice(secondMarkerIndex + 1).replace(/\*/g, ""),
+    after: phrase.slice(end).replace(/\*/g, ""),
   };
+}
+
+function stripMarkers(phrase: string) {
+  return phrase.replace(/\*/g, "");
+}
+
+function normalizeWordToken(token: string): string | null {
+  const normalized = token.trim().replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "");
+  return normalized ? normalized : null;
+}
+
+function tokenizeSelectableSentence(phrase: string): WordSegment[] {
+  const cleanPhrase = stripMarkers(phrase);
+  if (!cleanPhrase) {
+    return [];
+  }
+
+  const matcher = /([A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*)/g;
+  const chunks: WordSegment[] = [];
+  let cursor = 0;
+
+  for (const match of cleanPhrase.matchAll(matcher)) {
+    const index = match.index ?? 0;
+    const token = match[0] ?? "";
+
+    if (index > cursor) {
+      chunks.push({
+        text: cleanPhrase.slice(cursor, index),
+        selectable: false,
+      });
+    }
+
+    const normalizedWord = normalizeWordToken(token);
+    chunks.push({
+      text: token,
+      selectable: Boolean(normalizedWord),
+      normalizedWord: normalizedWord ?? undefined,
+    });
+    cursor = index + token.length;
+  }
+
+  if (cursor < cleanPhrase.length) {
+    chunks.push({
+      text: cleanPhrase.slice(cursor),
+      selectable: false,
+    });
+  }
+
+  return chunks;
 }
 
 function adjustTextareaHeight(textarea: HTMLTextAreaElement) {
@@ -172,11 +222,13 @@ function createOptimisticFlashcard(item: HistoryItem, flashcardId: string): Flas
 
 export function DefineForm() {
   const queryClient = useQueryClient();
+  const phraseTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [activeView, setActiveView] = useState<"define" | "history" | "flashcards">(
     "define",
   );
   const [phrase, setPhrase] = useState("");
+  const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DefineApiSuccess | null>(null);
   const [historyActionError, setHistoryActionError] = useState<string | null>(null);
@@ -184,6 +236,10 @@ export function DefineForm() {
   const [expandedFlashcardId, setExpandedFlashcardId] = useState<string | null>(null);
 
   const preview = getPreviewParts(phrase);
+  const mirroredSentence = stripMarkers(phrase);
+  const selectableSentence = useMemo(() => tokenizeSelectableSentence(phrase), [phrase]);
+  const markerSelectedWord = preview?.marked.trim() || null;
+  const targetWord = selectedWord ?? markerSelectedWord;
 
   const historyQuery = useInfiniteQuery({
     queryKey: queryKeys.history(HISTORY_PAGE_SIZE),
@@ -399,6 +455,11 @@ export function DefineForm() {
     onSuccess: async (payload) => {
       setResult(payload);
       setActiveView("define");
+      setPhrase("");
+      setSelectedWord(null);
+      if (phraseTextareaRef.current) {
+        adjustTextareaHeight(phraseTextareaRef.current);
+      }
 
       if (payload.historyItem) {
         queryClient.setQueryData<InfiniteData<HistoryApiSuccess, string | null>>(
@@ -559,7 +620,10 @@ export function DefineForm() {
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    defineMutation.mutate(phrase);
+    defineMutation.mutate({
+      phrase,
+      targetWord: targetWord ?? undefined,
+    });
   }
 
   return (
@@ -609,13 +673,29 @@ export function DefineForm() {
               <textarea
                 id="phrase"
                 name="phrase"
+                ref={phraseTextareaRef}
                 rows={3}
-                placeholder="Enter a phrase with an *esoteric* word in it"
+                placeholder="Type a sentence. You can mark a word like *esoteric* or tap one below."
                 autoComplete="off"
                 className="home-textarea"
                 value={phrase}
                 onChange={(event) => {
-                  setPhrase(event.target.value);
+                  const nextPhrase = event.target.value;
+                  const nextSentence = stripMarkers(nextPhrase);
+
+                  setPhrase(nextPhrase);
+                  setSelectedWord((current) => {
+                    if (!current) {
+                      return current;
+                    }
+
+                    const hasWord = tokenizeSelectableSentence(nextSentence).some(
+                      (segment) =>
+                        segment.normalizedWord?.toLowerCase() === current.toLowerCase(),
+                    );
+
+                    return hasWord ? current : null;
+                  });
                   adjustTextareaHeight(event.target);
                 }}
                 disabled={isLoading}
@@ -629,13 +709,35 @@ export function DefineForm() {
               </Button>
             </div>
 
-            {preview ? (
+            {mirroredSentence.trim() ? (
               <div className="home-preview">
-                <p className="home-preview-label">Preview</p>
+                <h2 className="home-preview-label">Context</h2>
                 <div className="home-preview-text">
-                  {preview.before}
-                  <span className="home-preview-mark">{preview.marked}</span>
-                  {preview.after}
+                  {selectableSentence.map((segment, index) => {
+                    if (!segment.selectable || !segment.normalizedWord) {
+                      return <span key={`${segment.text}-${index}`}>{segment.text}</span>;
+                    }
+
+                    const isActive =
+                      segment.normalizedWord.toLowerCase() === targetWord?.toLowerCase();
+
+                    return (
+                      <button
+                        key={`${segment.text}-${index}`}
+                        type="button"
+                        className={`home-preview-word${isActive ? " is-active" : ""}`}
+                        onClick={() => {
+                          setSelectedWord((current) =>
+                            current?.toLowerCase() === segment.normalizedWord?.toLowerCase()
+                              ? null
+                              : segment.normalizedWord ?? null,
+                          );
+                        }}
+                      >
+                        {segment.text}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ) : null}
