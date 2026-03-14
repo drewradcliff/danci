@@ -628,13 +628,13 @@ export function DefineForm() {
 
   return (
     <section className="home-workspace">
-      <div className="w-full rounded-2xl border border-slate-200 bg-white/80 p-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="w-full rounded-2xl border border-slate-200 bg-white/80 p-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-2">
         <div className="grid grid-cols-3 gap-1">
           <Button
             type="button"
             size="lg"
             variant={activeView === "define" ? "default" : "ghost"}
-            className="h-11 rounded-xl text-base font-semibold"
+            className="h-10 rounded-xl px-2 text-sm font-semibold sm:h-11 sm:text-base"
             onClick={() => {
               setActiveView("define");
             }}
@@ -645,7 +645,7 @@ export function DefineForm() {
             type="button"
             size="lg"
             variant={activeView === "history" ? "default" : "ghost"}
-            className="h-11 rounded-xl text-base font-semibold"
+            className="h-10 rounded-xl px-2 text-sm font-semibold sm:h-11 sm:text-base"
             onClick={() => {
               setActiveView("history");
             }}
@@ -656,7 +656,7 @@ export function DefineForm() {
             type="button"
             size="lg"
             variant={activeView === "flashcards" ? "default" : "ghost"}
-            className="h-11 rounded-xl text-base font-semibold"
+            className="h-10 rounded-xl px-2 text-sm font-semibold sm:h-11 sm:text-base"
             onClick={() => {
               setActiveView("flashcards");
             }}
@@ -790,8 +790,8 @@ export function DefineForm() {
       ) : null}
 
       {activeView === "history" ? (
-        <section className="mt-4 rounded-2xl border border-slate-200/85 bg-white/75 p-4">
-          <div className="flex items-center justify-between gap-3">
+        <section className="mt-4 rounded-2xl border border-slate-200/85 bg-white/75 p-3 sm:p-4">
+          <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center sm:gap-3">
             <div>
               <p className="home-result-label !mb-1">Recent Lookups</p>
               <p className="text-sm text-slate-600">Sentence + actions.</p>
@@ -828,18 +828,18 @@ export function DefineForm() {
               return (
                 <article
                   key={item.id}
-                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                  className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:px-4 sm:py-3.5"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm leading-[1.6] text-slate-700">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="min-w-0 text-sm leading-[1.6] break-words text-slate-700">
                       {renderHighlightedSentence(item.phraseInput, item.targetText)}
                     </p>
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:flex-nowrap">
                       <Button
                         type="button"
                         size="sm"
                         variant={item.flashcard ? "secondary" : "outline"}
-                        className="rounded-xl"
+                        className="min-h-9 flex-1 rounded-xl whitespace-normal sm:flex-none"
                         disabled={isAdding || isRemoving || isDeleting}
                         onClick={() => {
                           if (item.flashcard) {
@@ -859,7 +859,7 @@ export function DefineForm() {
                         type="button"
                         size="sm"
                         variant="outline"
-                        className="rounded-xl"
+                        className="min-h-9 flex-1 rounded-xl whitespace-normal sm:flex-none"
                         disabled={isAdding || isRemoving || isDeleting}
                         onClick={() => {
                           deleteHistoryMutation.mutate({
@@ -882,6 +882,7 @@ export function DefineForm() {
               <Button
                 type="button"
                 variant="outline"
+                className="w-full sm:w-auto"
                 disabled={isHistoryLoadingMore}
                 onClick={() => {
                   void historyQuery.fetchNextPage();
@@ -895,8 +896,8 @@ export function DefineForm() {
       ) : null}
 
       {activeView === "flashcards" ? (
-        <section className="mt-4 rounded-2xl border border-slate-200/85 bg-white/75 p-4">
-          <div className="flex items-center justify-between gap-3">
+        <section className="mt-4 rounded-2xl border border-slate-200/85 bg-white/75 p-3 sm:p-4">
+          <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center sm:gap-3">
             <div>
               <p className="home-result-label !mb-1">Flashcards</p>
               <p className="text-sm text-slate-600">Tap a word to reveal its saved content.</p>
@@ -932,23 +933,25 @@ export function DefineForm() {
               return (
                 <article
                   key={card.id}
-                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                  className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:px-4 sm:py-3.5"
                 >
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <button
                       type="button"
-                      className="w-full text-left"
+                      className="w-full min-w-0 text-left"
                       onClick={() => {
                         setExpandedFlashcardId((current) => (current === card.id ? null : card.id));
                       }}
                     >
-                      <p className="text-lg font-semibold text-slate-800">{card.term}</p>
+                      <p className="break-words text-lg font-semibold text-slate-800">
+                        {card.term}
+                      </p>
                     </button>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="rounded-xl"
+                      className="min-h-9 w-full rounded-xl whitespace-normal sm:w-auto"
                       disabled={isRemoving}
                       onClick={() => {
                         removeFlashcardMutation.mutate({
