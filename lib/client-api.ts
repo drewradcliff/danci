@@ -150,13 +150,19 @@ export const queryKeys = {
   flashcards: () => ["flashcards"] as const,
 };
 
-export async function definePhrase(phrase: string) {
+export async function definePhrase({
+  phrase,
+  targetWord,
+}: {
+  phrase: string;
+  targetWord?: string;
+}) {
   return requestJson<DefineApiSuccess>("/api/define", {
     method: "POST",
     headers: {
       "content-type": "application/json",
     },
-    body: JSON.stringify({ phrase }),
+    body: JSON.stringify({ phrase, targetWord }),
   });
 }
 

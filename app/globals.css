@@ -472,6 +472,40 @@
   color: oklch(0.33 0.035 241);
 }
 
+.home-preview-word {
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  padding: 0.05rem 0.2rem;
+  margin: 0;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.home-preview-word:hover {
+  border-color: oklch(0.79 0.06 215 / 0.68);
+  background: oklch(0.95 0.02 216 / 0.7);
+}
+
+.home-preview-word:focus-visible {
+  outline: none;
+  border-color: oklch(0.67 0.11 214);
+  box-shadow: 0 0 0 2px oklch(0.76 0.08 214 / 0.3);
+}
+
+.home-preview-word.is-active {
+  border-color: oklch(0.72 0.08 208 / 0.8);
+  background: linear-gradient(125deg, oklch(0.9 0.04 210), oklch(0.86 0.08 200));
+  color: oklch(0.24 0.05 244);
+  font-weight: 700;
+}
+
 .home-preview-mark {
   border-radius: 9999px;
   background: linear-gradient(125deg, oklch(0.88 0.05 210), oklch(0.83 0.09 198));
