@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useInfiniteQuery,
   useMutation,
@@ -7,7 +8,7 @@ import {
   useQueryClient,
   type InfiniteData,
 } from "@tanstack/react-query";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +18,7 @@ import {
   definePhrase,
   fetchFlashcards,
   fetchHistory,
+  importGuestData,
   queryKeys,
   removeFlashcard as removeFlashcardRequest,
   type DeleteHistorySuccess,
@@ -25,9 +27,28 @@ import {
   type FlashcardItem,
   type HistoryApiSuccess,
   type HistoryItem,
+  type ImportGuestDataSuccess,
   type RemoveFlashcardSuccess,
   type ToggleFlashcardSuccess,
 } from "@/lib/client-api";
+import {
+  addGuestFlashcard,
+  addGuestHistoryRecord,
+  buildGuestHistoryRecord,
+  clearGuestStore,
+  deleteGuestHistory,
+  getGuestStoreSnapshot,
+  GUEST_FLASHCARD_LIMIT,
+  GUEST_HISTORY_LIMIT,
+  guestStoreHasContent,
+  normalizeGuestImportPayload,
+  removeGuestFlashcard,
+  saveGuestStore,
+  subscribeGuestStore,
+  toFlashcardItems,
+  toHistoryItems,
+  type GuestStoreData,
+} from "@/lib/guest-storage";
 
 type PreviewParts = {
   before: string;
@@ -41,7 +62,16 @@ type WordSegment = {
   normalizedWord?: string;
 };
 
+type DefineFormProps = {
+  isSignedIn: boolean;
+};
+
 const HISTORY_PAGE_SIZE = 20;
+const EMPTY_GUEST_STORE: GuestStoreData = {
+  version: 1,
+  history: [],
+  flashcards: [],
+};
 
 function getPreviewParts(phrase: string): PreviewParts | null {
   const markedMatch = phrase.match(/\*([^*]+)\*/);
@@ -220,7 +250,7 @@ function createOptimisticFlashcard(item: HistoryItem, flashcardId: string): Flas
   };
 }
 
-export function DefineForm() {
+export function DefineForm({ isSignedIn }: DefineFormProps) {
   const queryClient = useQueryClient();
   const phraseTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -234,6 +264,16 @@ export function DefineForm() {
   const [historyActionError, setHistoryActionError] = useState<string | null>(null);
   const [flashcardsActionError, setFlashcardsActionError] = useState<string | null>(null);
   const [expandedFlashcardId, setExpandedFlashcardId] = useState<string | null>(null);
+  const [dismissedImportPrompt, setDismissedImportPrompt] = useState(false);
+  const guestStore = useSyncExternalStore(
+    subscribeGuestStore,
+    getGuestStoreSnapshot,
+    () => EMPTY_GUEST_STORE,
+  );
+
+  function updateGuestStore(nextStore: GuestStoreData) {
+    saveGuestStore(nextStore);
+  }
 
   const preview = getPreviewParts(phrase);
   const mirroredSentence = stripMarkers(phrase);
@@ -247,12 +287,14 @@ export function DefineForm() {
       fetchHistory({ cursor: pageParam, limit: HISTORY_PAGE_SIZE }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled: isSignedIn,
   });
 
   const flashcardsQuery = useQuery({
     queryKey: queryKeys.flashcards(),
     queryFn: fetchFlashcards,
     select: (data) => data.items,
+    enabled: isSignedIn,
   });
 
   const addFlashcardMutation = useMutation<
@@ -305,8 +347,7 @@ export function DefineForm() {
           current?.items,
           createOptimisticFlashcard(item, optimisticFlashcardId),
         ),
-      }),
-      );
+      }));
 
       return {
         previousHistory,
@@ -355,8 +396,7 @@ export function DefineForm() {
           },
           { removeId: context?.optimisticFlashcardId },
         ),
-      }),
-      );
+      }));
     },
     onSettled: async () => {
       await Promise.all([
@@ -459,6 +499,12 @@ export function DefineForm() {
       setSelectedWord(null);
       if (phraseTextareaRef.current) {
         adjustTextareaHeight(phraseTextareaRef.current);
+      }
+
+      if (payload.storageMode === "guest") {
+        const record = buildGuestHistoryRecord(payload);
+        updateGuestStore(addGuestHistoryRecord(guestStore, record));
+        return;
       }
 
       if (payload.historyItem) {
@@ -571,22 +617,50 @@ export function DefineForm() {
     },
   });
 
-  const historyItems = historyQuery.data?.pages.flatMap((page) => page.items) ?? [];
-  const flashcards = flashcardsQuery.data ?? [];
+  const importGuestDataMutation = useMutation<
+    ImportGuestDataSuccess,
+    Error,
+    GuestStoreData
+  >({
+    mutationFn: (store) =>
+      importGuestData({
+        history: store.history,
+        flashcards: store.flashcards,
+      }),
+    onSuccess: async () => {
+      clearGuestStore();
+      setDismissedImportPrompt(true);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.history(HISTORY_PAGE_SIZE) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.flashcards() }),
+      ]);
+    },
+  });
+
+  const guestHistoryItems = useMemo(() => toHistoryItems(guestStore), [guestStore]);
+  const guestFlashcards = useMemo(() => toFlashcardItems(guestStore), [guestStore]);
+  const historyItems = isSignedIn
+    ? historyQuery.data?.pages.flatMap((page) => page.items) ?? []
+    : guestHistoryItems;
+  const flashcards = isSignedIn ? flashcardsQuery.data ?? [] : guestFlashcards;
   const isLoading = defineMutation.isPending;
-  const isHistoryLoading = historyQuery.isPending && !historyQuery.data;
-  const isHistoryLoadingMore = historyQuery.isFetchingNextPage;
-  const isFlashcardsLoading = flashcardsQuery.isPending && !flashcardsQuery.data;
+  const isHistoryLoading = isSignedIn ? historyQuery.isPending && !historyQuery.data : false;
+  const isHistoryLoadingMore = isSignedIn ? historyQuery.isFetchingNextPage : false;
+  const isFlashcardsLoading = isSignedIn
+    ? flashcardsQuery.isPending && !flashcardsQuery.data
+    : false;
   const historyError =
     historyActionError ??
-    (historyQuery.error
+    (isSignedIn && historyQuery.error
       ? getErrorMessage(historyQuery.error, "Unable to load history.")
       : null);
   const flashcardsError =
     flashcardsActionError ??
-    (flashcardsQuery.error
+    (isSignedIn && flashcardsQuery.error
       ? getErrorMessage(flashcardsQuery.error, "Unable to load flashcards.")
       : null);
+  const showImportPrompt =
+    isSignedIn && guestStoreHasContent(guestStore) && !dismissedImportPrompt;
 
   function renderHighlightedSentence(phraseText: string, targetText: string) {
     const marked = getPreviewParts(phraseText);
@@ -626,9 +700,145 @@ export function DefineForm() {
     });
   }
 
+  function handleAddFlashcard(item: HistoryItem) {
+    setHistoryActionError(null);
+    setFlashcardsActionError(null);
+
+    if (isSignedIn) {
+      addFlashcardMutation.mutate(item);
+      return;
+    }
+
+    const next = addGuestFlashcard(guestStore, item.id);
+    if (!next.ok) {
+      setHistoryActionError(
+        next.reason === "LIMIT_REACHED"
+          ? `Guest flashcards are capped at ${GUEST_FLASHCARD_LIMIT}. Sign in to keep more.`
+          : "Unable to add flashcard.",
+      );
+      return;
+    }
+
+    updateGuestStore(next.store);
+  }
+
+  function handleRemoveFlashcard({
+    flashcardId,
+    historyId,
+    fromFlashcardsView,
+  }: {
+    flashcardId: string;
+    historyId?: string;
+    fromFlashcardsView?: boolean;
+  }) {
+    setHistoryActionError(null);
+    setFlashcardsActionError(null);
+
+    if (isSignedIn) {
+      removeFlashcardMutation.mutate({
+        flashcardId,
+        historyId,
+        fromFlashcardsView,
+      });
+      return;
+    }
+
+    updateGuestStore(removeGuestFlashcard(guestStore, flashcardId));
+    setExpandedFlashcardId((current) => (current === flashcardId ? null : current));
+  }
+
+  function handleDeleteHistory({ historyId, flashcardId }: { historyId: string; flashcardId?: string }) {
+    setHistoryActionError(null);
+    setFlashcardsActionError(null);
+
+    if (isSignedIn) {
+      deleteHistoryMutation.mutate({ historyId, flashcardId });
+      return;
+    }
+
+    const next = deleteGuestHistory(guestStore, historyId);
+    updateGuestStore(next.store);
+    if (flashcardId) {
+      setExpandedFlashcardId((current) =>
+        current && next.removedFlashcardIds.includes(current) ? null : current,
+      );
+    }
+  }
+
+  function handleImportGuestData() {
+    const payload = normalizeGuestImportPayload(guestStore);
+    if (!guestStoreHasContent(payload)) {
+      setDismissedImportPrompt(true);
+      return;
+    }
+
+    importGuestDataMutation.mutate(payload);
+  }
+
   return (
     <section className="home-workspace">
-      <div className="w-full rounded-2xl border border-slate-200 bg-white/80 p-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-2">
+      <div className="rounded-2xl border border-slate-200/85 bg-white/75 p-3 text-sm text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        {isSignedIn ? (
+          showImportPrompt ? (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold text-slate-800">Import your guest work</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  Local lookups and flashcards are ready to move into this account.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="rounded-xl"
+                  disabled={importGuestDataMutation.isPending}
+                  onClick={handleImportGuestData}
+                >
+                  {importGuestDataMutation.isPending ? "Importing..." : "Import Data"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-xl"
+                  disabled={importGuestDataMutation.isPending}
+                  onClick={() => {
+                    setDismissedImportPrompt(true);
+                  }}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p>
+              Account mode is live. New lookups sync to your private history and flashcards.
+            </p>
+          )
+        ) : (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold text-slate-800">Start defining immediately</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Guest mode keeps your newest {GUEST_HISTORY_LIMIT} lookups and up to{" "}
+                {GUEST_FLASHCARD_LIMIT} flashcards on this device.
+              </p>
+            </div>
+            <Button asChild size="sm" variant="outline" className="rounded-xl">
+              <Link href="/sign-in?callbackURL=/">Sign In To Sync</Link>
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {importGuestDataMutation.error ? (
+        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {getErrorMessage(importGuestDataMutation.error, "Unable to import guest data.")}
+        </p>
+      ) : null}
+
+      <div className="mt-4 w-full rounded-2xl border border-slate-200 bg-white/80 p-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-2">
         <div className="grid grid-cols-3 gap-1">
           <Button
             type="button"
@@ -794,9 +1004,13 @@ export function DefineForm() {
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center sm:gap-3">
             <div>
               <p className="home-result-label !mb-1">Recent Lookups</p>
-              <p className="text-sm text-slate-600">Sentence + actions.</p>
+              <p className="text-sm text-slate-600">
+                {isSignedIn
+                  ? "Sentence + actions."
+                  : `Newest ${GUEST_HISTORY_LIMIT} lookups stay on this device.`}
+              </p>
             </div>
-            {historyQuery.isFetching ? (
+            {isSignedIn && historyQuery.isFetching ? (
               <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
                 Loading...
               </span>
@@ -816,12 +1030,16 @@ export function DefineForm() {
           <div className="mt-3 flex flex-col gap-3">
             {historyItems.map((item) => {
               const isAdding =
-                addFlashcardMutation.isPending && addFlashcardMutation.variables?.id === item.id;
+                isSignedIn &&
+                addFlashcardMutation.isPending &&
+                addFlashcardMutation.variables?.id === item.id;
               const isRemoving =
+                isSignedIn &&
                 removeFlashcardMutation.isPending &&
                 item.flashcard !== null &&
                 removeFlashcardMutation.variables?.flashcardId === item.flashcard.id;
               const isDeleting =
+                isSignedIn &&
                 deleteHistoryMutation.isPending &&
                 deleteHistoryMutation.variables?.historyId === item.id;
 
@@ -843,14 +1061,14 @@ export function DefineForm() {
                         disabled={isAdding || isRemoving || isDeleting}
                         onClick={() => {
                           if (item.flashcard) {
-                            removeFlashcardMutation.mutate({
+                            handleRemoveFlashcard({
                               flashcardId: item.flashcard.id,
                               historyId: item.id,
                             });
                             return;
                           }
 
-                          addFlashcardMutation.mutate(item);
+                          handleAddFlashcard(item);
                         }}
                       >
                         {item.flashcard ? "Added" : "Add Flashcard"}
@@ -862,7 +1080,7 @@ export function DefineForm() {
                         className="min-h-9 flex-1 rounded-xl whitespace-normal sm:flex-none"
                         disabled={isAdding || isRemoving || isDeleting}
                         onClick={() => {
-                          deleteHistoryMutation.mutate({
+                          handleDeleteHistory({
                             historyId: item.id,
                             flashcardId: item.flashcard?.id,
                           });
@@ -877,7 +1095,13 @@ export function DefineForm() {
             })}
           </div>
 
-          {historyQuery.hasNextPage ? (
+          {!isSignedIn && historyItems.length >= GUEST_HISTORY_LIMIT ? (
+            <p className="mt-4 text-sm text-slate-600">
+              Guest history automatically keeps the newest {GUEST_HISTORY_LIMIT} lookups.
+            </p>
+          ) : null}
+
+          {isSignedIn && historyQuery.hasNextPage ? (
             <div className="mt-4">
               <Button
                 type="button"
@@ -900,9 +1124,13 @@ export function DefineForm() {
           <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center sm:gap-3">
             <div>
               <p className="home-result-label !mb-1">Flashcards</p>
-              <p className="text-sm text-slate-600">Tap a word to reveal its saved content.</p>
+              <p className="text-sm text-slate-600">
+                {isSignedIn
+                  ? "Tap a word to reveal its saved content."
+                  : `Guest mode can keep up to ${GUEST_FLASHCARD_LIMIT} flashcards.`}
+              </p>
             </div>
-            {flashcardsQuery.isFetching ? (
+            {isSignedIn && flashcardsQuery.isFetching ? (
               <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
                 Loading...
               </span>
@@ -927,6 +1155,7 @@ export function DefineForm() {
             {flashcards.map((card) => {
               const isExpanded = expandedFlashcardId === card.id;
               const isRemoving =
+                isSignedIn &&
                 removeFlashcardMutation.isPending &&
                 removeFlashcardMutation.variables?.flashcardId === card.id;
 
@@ -954,7 +1183,7 @@ export function DefineForm() {
                       className="min-h-9 w-full rounded-xl whitespace-normal sm:w-auto"
                       disabled={isRemoving}
                       onClick={() => {
-                        removeFlashcardMutation.mutate({
+                        handleRemoveFlashcard({
                           flashcardId: card.id,
                           historyId: card.lookupHistoryId ?? undefined,
                           fromFlashcardsView: true,
@@ -1037,6 +1266,12 @@ export function DefineForm() {
               );
             })}
           </div>
+
+          {!isSignedIn ? (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm text-slate-600">
+              Sign in when you want synced flashcards and storage beyond {GUEST_FLASHCARD_LIMIT}.
+            </div>
+          ) : null}
         </section>
       ) : null}
     </section>
