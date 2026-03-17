@@ -7,6 +7,14 @@ import type {
 
 const STORAGE_KEY = "danci.guest-store.v1";
 const STORAGE_EVENT = "danci:guest-store";
+const EMPTY_STORE: GuestStoreData = {
+  version: 1,
+  history: [],
+  flashcards: [],
+};
+
+let cachedRawStore: string | null = null;
+let cachedStoreSnapshot: GuestStoreData = EMPTY_STORE;
 
 export const GUEST_HISTORY_LIMIT = 10;
 export const GUEST_FLASHCARD_LIMIT = 5;
@@ -45,11 +53,7 @@ export type GuestStoreData = {
 };
 
 function createEmptyStore(): GuestStoreData {
-  return {
-    version: 1,
-    history: [],
-    flashcards: [],
-  };
+  return EMPTY_STORE;
 }
 
 function parseStore(value: string): GuestStoreData {
@@ -147,7 +151,24 @@ export function subscribeGuestStore(onStoreChange: () => void) {
 }
 
 export function getGuestStoreSnapshot() {
-  return loadGuestStore();
+  if (typeof window === "undefined") {
+    return EMPTY_STORE;
+  }
+
+  const raw = window.localStorage.getItem(STORAGE_KEY);
+  if (!raw) {
+    cachedRawStore = null;
+    cachedStoreSnapshot = EMPTY_STORE;
+    return cachedStoreSnapshot;
+  }
+
+  if (raw === cachedRawStore) {
+    return cachedStoreSnapshot;
+  }
+
+  cachedRawStore = raw;
+  cachedStoreSnapshot = parseStore(raw);
+  return cachedStoreSnapshot;
 }
 
 export function buildGuestHistoryRecord(payload: DefineApiSuccess): GuestHistoryRecord {
