@@ -1,7 +1,16 @@
+import Link from "next/link";
+import { headers } from "next/headers";
+
 import { LogoutButton } from "@/components/auth/logout-button";
 import { DefineForm } from "@/components/define-form";
+import { Button } from "@/components/ui/button";
+import { getServerSession } from "@/lib/session";
 
-export default function Home() {
+export default async function Home() {
+  const headerStore = await headers();
+  const session = await getServerSession(new Headers(headerStore));
+  const isSignedIn = Boolean(session?.user?.id);
+
   return (
     <main className="signin-shell">
       <section className="home-shell">
@@ -12,12 +21,22 @@ export default function Home() {
             </span>
             <div>
               <p className="signin-kicker">Danci</p>
-              <p className="home-brand-note">Private word desk</p>
+              <p className="home-brand-note">
+                {isSignedIn ? "Synced word desk" : "Saved on this device"}
+              </p>
             </div>
           </div>
-          <LogoutButton />
+
+          {isSignedIn ? (
+            <LogoutButton />
+          ) : (
+            <Button asChild size="sm" className="rounded-xl px-4">
+              <Link href="/sign-in?callbackURL=/">Sign In To Sync</Link>
+            </Button>
+          )}
         </header>
-        <DefineForm />
+
+        <DefineForm isSignedIn={isSignedIn} />
       </section>
     </main>
   );

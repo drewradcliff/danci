@@ -32,6 +32,7 @@ export type DefineApiSuccess = {
     usedFallback: boolean;
     jsonParseFailed: boolean;
   };
+  storageMode: "account" | "guest";
   historyItem?: HistoryItem;
 };
 
@@ -90,6 +91,41 @@ export type DeleteHistorySuccess = {
   removed: boolean;
   historyId: string;
   removedFlashcardIds?: string[];
+};
+
+export type GuestImportHistoryItem = {
+  id: string;
+  phraseInput: string;
+  targetText: string;
+  contextText: string;
+  createdAt: string;
+  result: {
+    structured: {
+      word: string;
+      meaning: string;
+      examples: string[];
+    } | null;
+    fallbackText: string | null;
+    word: string | null;
+    definition: {
+      meaning: string;
+      examples: string[];
+    } | null;
+    resultPreview: string | null;
+  };
+};
+
+export type GuestImportFlashcardItem = {
+  id: string;
+  term: string;
+  lookupHistoryId: string | null;
+  createdAt: string;
+};
+
+export type ImportGuestDataSuccess = {
+  importedHistoryCount: number;
+  importedFlashcardCount: number;
+  skippedFlashcardCount: number;
 };
 
 export class ApiClientError extends Error {
@@ -213,5 +249,21 @@ export async function deleteHistory(historyId: string) {
       "content-type": "application/json",
     },
     body: JSON.stringify({ historyId }),
+  });
+}
+
+export async function importGuestData({
+  history,
+  flashcards,
+}: {
+  history: GuestImportHistoryItem[];
+  flashcards: GuestImportFlashcardItem[];
+}) {
+  return requestJson<ImportGuestDataSuccess>("/api/guest/import", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ history, flashcards }),
   });
 }

@@ -9,7 +9,7 @@ import {
   type DictionaryDefinition,
 } from "@/lib/dictionary";
 import { getHistoryResultPreview } from "@/lib/history";
-import { buildUnauthorizedJson, getServerSession } from "@/lib/session";
+import { getServerSession } from "@/lib/session";
 import { parseMarkedWord } from "@/lib/parse-marked-word";
 
 type DefineRequestBody = {
@@ -201,10 +201,6 @@ export async function POST(request: Request) {
   const session = await getServerSession(request.headers);
   const userId = getSessionUserId(session);
 
-  if (!session || !userId) {
-    return buildUnauthorizedJson();
-  }
-
   let body: DefineRequestBody;
   try {
     body = (await request.json()) as DefineRequestBody;
@@ -280,6 +276,7 @@ export async function POST(request: Request) {
       usedFallback,
       jsonParseFailed,
     },
+    storageMode: userId ? "account" : "guest",
   };
 
   const resultJson: HistoryResultJson = {
@@ -300,30 +297,32 @@ export async function POST(request: Request) {
     flashcard: null;
   } | null = null;
 
-  try {
-    const historyRecordId = buildHistoryRecordId();
-    const createdAt = new Date().toISOString();
+  if (userId) {
+    try {
+      const historyRecordId = buildHistoryRecordId();
+      const createdAt = new Date().toISOString();
 
-    await db.insert(lookupHistory).values({
-      id: historyRecordId,
-      userId,
-      phraseInput: responsePayload.phrase,
-      targetText: responsePayload.word,
-      contextText: responsePayload.context,
-      resultJson,
-    });
+      await db.insert(lookupHistory).values({
+        id: historyRecordId,
+        userId,
+        phraseInput: responsePayload.phrase,
+        targetText: responsePayload.word,
+        contextText: responsePayload.context,
+        resultJson,
+      });
 
-    historyItem = {
-      id: historyRecordId,
-      phraseInput: responsePayload.phrase,
-      targetText: responsePayload.word,
-      contextText: responsePayload.context,
-      resultPreview: getHistoryResultPreview(resultJson),
-      createdAt,
-      flashcard: null,
-    };
-  } catch (error) {
-    console.error("Failed to persist lookup history", error);
+      historyItem = {
+        id: historyRecordId,
+        phraseInput: responsePayload.phrase,
+        targetText: responsePayload.word,
+        contextText: responsePayload.context,
+        resultPreview: getHistoryResultPreview(resultJson),
+        createdAt,
+        flashcard: null,
+      };
+    } catch (error) {
+      console.error("Failed to persist lookup history", error);
+    }
   }
 
   return NextResponse.json({

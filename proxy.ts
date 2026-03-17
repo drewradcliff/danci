@@ -24,6 +24,10 @@ function isAuthHandlerPath(pathname: string) {
   return pathname.startsWith("/api/auth");
 }
 
+function isDefinePath(pathname: string) {
+  return pathname === "/api/define";
+}
+
 function isSignInPath(pathname: string) {
   return pathname === "/sign-in";
 }
@@ -31,7 +35,13 @@ function isSignInPath(pathname: string) {
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  if (isPublicPath(pathname) || isAuthHandlerPath(pathname)) {
+  if (
+    isPublicPath(pathname) ||
+    isAuthHandlerPath(pathname) ||
+    isSignInPath(pathname) ||
+    isDefinePath(pathname) ||
+    pathname === "/"
+  ) {
     return NextResponse.next();
   }
 
