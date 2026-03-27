@@ -1164,10 +1164,10 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
                   key={card.id}
                   className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:px-4 sm:py-3.5"
                 >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start justify-between gap-3 sm:items-center">
                     <button
                       type="button"
-                      className="w-full min-w-0 text-left"
+                      className="min-w-0 flex-1 text-left"
                       onClick={() => {
                         setExpandedFlashcardId((current) => (current === card.id ? null : card.id));
                       }}
@@ -1180,7 +1180,7 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="min-h-9 w-full rounded-xl whitespace-normal sm:w-auto"
+                      className="h-8 shrink-0 rounded-xl px-3 text-xs whitespace-nowrap sm:text-sm"
                       disabled={isRemoving}
                       onClick={() => {
                         handleRemoveFlashcard({
