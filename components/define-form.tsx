@@ -661,6 +661,9 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
       : null);
   const showImportPrompt =
     isSignedIn && guestStoreHasContent(guestStore) && !dismissedImportPrompt;
+  const guestLookupLimitReached =
+    !isSignedIn && guestStore.history.length >= GUEST_HISTORY_LIMIT;
+  const guestLookupLimitMessage = `Guest mode allows up to ${GUEST_HISTORY_LIMIT} lookups. Delete one from history or sign in to keep defining words.`;
 
   function renderHighlightedSentence(phraseText: string, targetText: string) {
     const marked = getPreviewParts(phraseText);
@@ -694,6 +697,12 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (guestLookupLimitReached) {
+      setError(guestLookupLimitMessage);
+      return;
+    }
+
     defineMutation.mutate({
       phrase,
       targetWord: targetWord ?? undefined,
@@ -758,6 +767,9 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
 
     const next = deleteGuestHistory(guestStore, historyId);
     updateGuestStore(next.store);
+    if (next.store.history.length < GUEST_HISTORY_LIMIT) {
+      setError((current) => (current === guestLookupLimitMessage ? null : current));
+    }
     if (flashcardId) {
       setExpandedFlashcardId((current) =>
         current && next.removedFlashcardIds.includes(current) ? null : current,
@@ -821,7 +833,7 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
             <div>
               <p className="font-semibold text-slate-800">Start defining immediately</p>
               <p className="mt-1 text-sm text-slate-600">
-                Guest mode keeps your newest {GUEST_HISTORY_LIMIT} lookups and up to{" "}
+                Guest mode allows up to {GUEST_HISTORY_LIMIT} lookups and{" "}
                 {GUEST_FLASHCARD_LIMIT} flashcards on this device.
               </p>
             </div>
@@ -913,11 +925,21 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
               <Button
                 type="submit"
                 className="home-submit-button h-12 shrink-0 rounded-xl"
-                disabled={isLoading}
+                disabled={isLoading || guestLookupLimitReached}
               >
                 {isLoading ? "Defining..." : "Define"}
               </Button>
             </div>
+
+            {guestLookupLimitReached ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {guestLookupLimitMessage}{" "}
+                <Link href="/sign-in?callbackURL=/" className="font-semibold underline">
+                  Sign in
+                </Link>
+                .
+              </div>
+            ) : null}
 
             {mirroredSentence.trim() ? (
               <div className="home-preview">
@@ -1007,7 +1029,7 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
               <p className="text-sm text-slate-600">
                 {isSignedIn
                   ? "Sentence + actions."
-                  : `Newest ${GUEST_HISTORY_LIMIT} lookups stay on this device.`}
+                  : `Guest mode allows up to ${GUEST_HISTORY_LIMIT} lookups on this device.`}
               </p>
             </div>
             {isSignedIn && historyQuery.isFetching ? (
@@ -1097,7 +1119,7 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
 
           {!isSignedIn && historyItems.length >= GUEST_HISTORY_LIMIT ? (
             <p className="mt-4 text-sm text-slate-600">
-              Guest history automatically keeps the newest {GUEST_HISTORY_LIMIT} lookups.
+              You have reached the guest lookup limit. Delete a lookup or sign in to keep going.
             </p>
           ) : null}
 
