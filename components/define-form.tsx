@@ -1070,7 +1070,7 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
                   key={item.id}
                   className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:px-4 sm:py-3.5"
                 >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm leading-[1.6] break-words text-slate-700">
                         {renderHighlightedSentence(item.phraseInput, item.targetText)}
@@ -1079,7 +1079,7 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
                         {item.resultPreview ?? "Meaning unavailable."}
                       </p>
                     </div>
-                    <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:flex-nowrap">
+                    <div className="flex min-w-0 w-full flex-wrap gap-2 sm:w-auto sm:flex-nowrap">
                       <Button
                         type="button"
                         size="sm"
