@@ -1071,9 +1071,14 @@ export function DefineForm({ isSignedIn }: DefineFormProps) {
                   className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:px-4 sm:py-3.5"
                 >
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="min-w-0 text-sm leading-[1.6] break-words text-slate-700">
-                      {renderHighlightedSentence(item.phraseInput, item.targetText)}
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm leading-[1.6] break-words text-slate-700">
+                        {renderHighlightedSentence(item.phraseInput, item.targetText)}
+                      </p>
+                      <p className="mt-1 truncate text-sm leading-[1.5] text-slate-500">
+                        {item.resultPreview ?? "Meaning unavailable."}
+                      </p>
+                    </div>
                     <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:flex-nowrap">
                       <Button
                         type="button"
