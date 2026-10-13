@@ -1,3 +1,5 @@
+const DICTIONARY_TIMEOUT_MS = 2_000;
+
 export type DictionaryDefinition = {
   meaning: string;
   examples: string[];
@@ -75,7 +77,7 @@ function collectDefinitions(input: unknown): DictionaryDefinition[] {
 }
 
 export async function getDictionaryDefinitions(
-  word: string
+  word: string,
 ): Promise<DictionaryDefinition[]> {
   const urls = [
     `https://freedictionaryapi.com/api/v1/entries/en/${encodeURIComponent(word)}`,
@@ -85,6 +87,7 @@ export async function getDictionaryDefinitions(
   let sawNotFound = false;
 
   for (const url of urls) {
+    const signal = AbortSignal.timeout(DICTIONARY_TIMEOUT_MS);
     let response: Response;
 
     try {
@@ -94,10 +97,12 @@ export async function getDictionaryDefinitions(
           accept: "application/json",
         },
         cache: "no-store",
+        signal,
       });
     } catch {
       continue;
     }
+
 
     if (response.status === 404) {
       sawNotFound = true;
